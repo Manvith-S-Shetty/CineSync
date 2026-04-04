@@ -63,7 +63,10 @@ app.get('/', (_req, res) => {
 
 const io = socketIO(server, {
     cors: {
-        origin: corsOriginOption,
+        origin: [
+            "http://localhost:5173",
+            "https://cine-sync-beta.vercel.app"
+          ],
         methods: ['GET', 'POST'],
         credentials: true,
     },

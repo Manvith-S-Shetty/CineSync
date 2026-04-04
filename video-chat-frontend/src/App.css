@@ -1,0 +1,37 @@
+.app-root {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.app-router-outlet {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.app-auth-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  min-height: 0;
+  background: #0f1116;
+  color: #e5e7eb;
+}
+
+.app-auth-loading__text {
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.app-login-route {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: radial-gradient(120% 80% at 50% -20%, rgba(59, 130, 246, 0.1), transparent 55%),
+    #0a0b0f;
+}

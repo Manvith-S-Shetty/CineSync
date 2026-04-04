@@ -1,5 +1,6 @@
 .room-join-container {
-    height: 100vh;
+    min-height: 100%;
+    height: 100%;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -22,6 +23,17 @@
 .room-join-card h2 {
     color: white;
     text-align: center;
+}
+
+.room-join-signed-in {
+    margin: 0 0 1rem;
+    text-align: center;
+    font-size: 14px;
+    color: rgba(255, 255, 255, 0.85);
+}
+
+.room-join-signed-in strong {
+    color: #fff;
 }
 form{
     display: flex;

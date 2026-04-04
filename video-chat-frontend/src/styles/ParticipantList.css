@@ -1,17 +1,13 @@
 .participants-panel {
-  background: rgba(0, 0, 0, 0.3);
+  background: #171a21;
   border-radius: 12px;
   display: flex;
   flex-direction: column;
-  margin: 10px;
-  backdrop-filter: blur(10px);
-  height: calc(100vh - 20px);
-  max-height: calc(100vh - 20px);
+  height: 100%;
+  min-height: 0;
   overflow: hidden;
-  width: 250px;
-  position: absolute;
-  left: 10px;
-  top: 0;
+  width: 100%;
+  border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .participants-panel h3 {
@@ -25,6 +21,7 @@
   flex: 1;
   overflow-y: auto;
   padding: 0.5rem;
+  min-height: 0;
 }
 
 .participant-item {
@@ -34,7 +31,11 @@
   border-radius: 8px;
   margin-bottom: 0.5rem;
   background: rgba(255, 255, 255, 0.05);
-  transition: all 0.3s ease;
+  transition: background 0.25s ease, border-color 0.25s ease, transform 0.2s ease;
+}
+
+.participant-item:hover {
+  background: rgba(255, 255, 255, 0.08);
 }
 
 .participant-item.active-speaker {
@@ -52,6 +53,19 @@
   justify-content: center;
   margin-right: 0.75rem;
   font-weight: bold;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.participant-avatar__img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.participant-avatar__initials {
+  font-size: 0.7rem;
+  letter-spacing: 0.02em;
 }
 
 .participant-info {
@@ -61,6 +75,22 @@
 .participant-name {
   font-size: 0.9rem;
   margin-bottom: 0.2rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.participant-name__text {
+  font-weight: 600;
+}
+
+.participant-you {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: rgba(147, 197, 253, 0.95);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
 }
 
 .participant-status {
@@ -77,10 +107,13 @@
 }
 
 .host-badge {
-  background: #ffd700;
-  color: #000;
-  padding: 0.2rem 0.4rem;
-  border-radius: 4px;
-  font-size: 0.7rem;
-  font-weight: bold;
+  background: linear-gradient(135deg, #fbbf24, #f59e0b);
+  color: #1a1a1a;
+  padding: 0.15rem 0.45rem;
+  border-radius: 6px;
+  font-size: 0.65rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  box-shadow: 0 1px 4px rgba(245, 158, 11, 0.35);
 } 

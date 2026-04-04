@@ -1,0 +1,44 @@
+.reaction-float-layer {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 200;
+  overflow: hidden;
+}
+
+.reaction-float-layer__particle {
+  position: absolute;
+  bottom: -10%;
+  transform: translateX(-50%);
+  animation: reaction-float-up 2.6s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  will-change: transform, opacity;
+}
+
+.reaction-float-layer__emoji {
+  font-size: clamp(2rem, 6vw, 3.5rem);
+  filter: drop-shadow(0 4px 12px rgba(0, 0, 0, 0.4));
+  display: block;
+}
+
+@keyframes reaction-float-up {
+  0% {
+    opacity: 0;
+    transform: translateX(-50%) translateY(0) scale(0.6);
+  }
+  12% {
+    opacity: 1;
+    transform: translateX(-50%) translateY(-12vh) scale(1.05);
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(-50%) translateY(-92vh) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reaction-float-layer__particle {
+    animation: none;
+    opacity: 0.9;
+    bottom: 20%;
+  }
+}

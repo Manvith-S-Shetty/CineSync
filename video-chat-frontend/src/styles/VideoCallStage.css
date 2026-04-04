@@ -1,0 +1,310 @@
+/* Video call: focus + strip + maximize overlay (no WebRTC concerns) */
+
+.video-call-stage {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+  width: 100%;
+  isolation: isolate;
+}
+
+.video-call-stage__body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  transition: opacity 0.25s ease, filter 0.25s ease;
+}
+
+@media (min-width: 720px) {
+  .video-call-stage__body--side-by-side {
+    flex-direction: row;
+    align-items: stretch;
+  }
+}
+
+.video-call-stage__body--maximized-backdrop {
+  opacity: 0.35;
+  filter: blur(2px);
+  pointer-events: none;
+}
+
+.video-call-stage__focus {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: min(36vh, 260px);
+  max-height: min(52vh, 560px);
+  transition: flex 0.35s ease, max-height 0.35s ease;
+}
+
+.video-call-stage__body--side-by-side .video-call-stage__focus {
+  flex: 1 1 58%;
+  max-height: none;
+  min-height: min(40vh, 320px);
+}
+
+.video-call-stage__strip {
+  flex: 0 1 auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 148px), 1fr));
+  gap: 8px;
+  min-height: 0;
+  min-width: 0;
+  max-height: min(42vh, 420px);
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 2px;
+  scrollbar-gutter: stable;
+}
+
+@media (min-width: 720px) {
+  .video-call-stage__body--side-by-side .video-call-stage__strip {
+    flex: 0 1 38%;
+    max-height: none;
+    grid-template-columns: 1fr;
+    align-content: start;
+  }
+}
+
+.video-tile {
+  position: relative;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #0a0a0c;
+  outline: none;
+  transition:
+    box-shadow 0.25s ease,
+    transform 0.2s ease,
+    border-color 0.2s ease;
+  border: 2px solid transparent;
+}
+
+.video-tile:focus-visible {
+  border-color: rgba(59, 130, 246, 0.7);
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.35);
+}
+
+.video-tile--focus {
+  min-height: min(32vh, 240px);
+  height: 100%;
+  border-color: rgba(59, 130, 246, 0.35);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+}
+
+.video-tile--strip {
+  aspect-ratio: 4 / 3;
+  min-height: 112px;
+  max-height: 200px;
+}
+
+.video-tile--strip .video-tile__media {
+  object-fit: cover;
+}
+
+.video-tile--focus .video-tile__media--contain {
+  object-fit: contain;
+}
+
+.video-tile__media {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  display: block;
+  background: #000;
+}
+
+.video-tile__click-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  cursor: pointer;
+  border: none;
+  padding: 0;
+  margin: 0;
+  background: transparent;
+  border-radius: inherit;
+}
+
+.video-tile__actions {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 4;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  justify-content: flex-end;
+  pointer-events: none;
+}
+
+.video-tile__actions > * {
+  pointer-events: auto;
+}
+
+.video-tile__icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(0, 0, 0, 0.55);
+  color: #e5e7eb;
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+  transition:
+    background 0.2s ease,
+    transform 0.15s ease,
+    border-color 0.2s ease;
+}
+
+.video-tile__icon-btn:hover {
+  background: rgba(37, 99, 235, 0.45);
+  border-color: rgba(96, 165, 250, 0.5);
+  transform: scale(1.05);
+}
+
+.video-tile__icon-btn .material-symbols-outlined {
+  font-size: 18px;
+  line-height: 1;
+}
+
+.video-tile__badge {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 8px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fbbf24;
+  border: 1px solid rgba(251, 191, 36, 0.35);
+  pointer-events: none;
+}
+
+.video-tile__badge + .video-tile__badge {
+  top: 30px;
+}
+
+.video-tile__badge--screen {
+  color: #93c5fd;
+  border-color: rgba(147, 197, 253, 0.4);
+}
+
+.video-tile__label {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  z-index: 3;
+  max-width: calc(100% - 16px);
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  background: rgba(0, 0, 0, 0.55);
+  pointer-events: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.video-call-stage__overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  padding: 8px;
+  background: rgba(2, 4, 10, 0.94);
+  backdrop-filter: blur(6px);
+  animation: video-call-overlay-in 0.28s ease;
+}
+
+@keyframes video-call-overlay-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.video-call-stage__overlay-top {
+  flex-shrink: 0;
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 8px;
+}
+
+.video-call-stage__overlay-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.video-call-stage__overlay .video-tile {
+  width: 100%;
+  max-width: min(100%, 1400px);
+  max-height: 100%;
+  aspect-ratio: auto;
+  min-height: min(70vh, 100%);
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+.video-call-stage__overlay .video-tile__media {
+  max-height: min(78vh, 100%);
+  object-fit: contain;
+}
+
+.video-call-stage__minimize-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.08);
+  color: #f4f4f5;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+.video-call-stage__minimize-btn:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.video-tile__placeholder,
+.video-tile__error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  height: 100%;
+  min-height: 140px;
+  padding: 16px;
+  text-align: center;
+  color: #9ca3af;
+  font-size: 13px;
+}
+
+.video-tile__error .material-symbols-outlined {
+  font-size: 40px;
+  opacity: 0.8;
+}

@@ -1,36 +1,40 @@
-import React from 'react';
+const ConnectionStatus = ({ status, roomId, isHost, reconnecting }) => {
+  const label = reconnecting ? 'reconnecting' : status;
 
-const ConnectionStatus = ({ status, roomId, isHost }) => {
-    const getStatusColor = () => {
-        switch (status) {
-            case 'connected': return '#4CAF50';
-            case 'connecting': return '#FFC107';
-            case 'disconnected': return '#F44336';
-            default: return '#9E9E9E';
-        }
-    };
-
-    return (
-        <div className="connection-status" style={{ backgroundColor: getStatusColor() }}>
-            <div className="status-content">
-                <span className="status-text">{status}</span>
-                {roomId && (
-                    <div className="room-info">
-                        <span>Room: {roomId}</span>
-                        <button 
-                            className="share-button"
-                            onClick={() => {
-                                navigator.clipboard.writeText(window.location.href);
-                                alert('Room link copied to clipboard!');
-                            }}
-                        >
-                            Share Room
-                        </button>
-                    </div>
-                )}
-            </div>
+  return (
+    <div
+      className="connection-status"
+      data-status={reconnecting ? 'reconnecting' : status}
+      role="status"
+      aria-live="polite"
+    >
+      <div className="connection-status__inner">
+        <div className="connection-status__left">
+          <span className="connection-status__dot" aria-hidden />
+          <span className="connection-status__label">{label}</span>
+          {reconnecting ? (
+            <span className="connection-status__hint">Reconnecting…</span>
+          ) : null}
         </div>
-    );
+        {roomId ? (
+          <div className="connection-status__right">
+            <span className="connection-status__room">Room {roomId}</span>
+            {isHost ? <span className="connection-status__host-badge">Host</span> : null}
+            <button
+              type="button"
+              className="connection-status__share"
+              onClick={() => {
+                navigator.clipboard.writeText(window.location.href);
+                alert('Room link copied to clipboard!');
+              }}
+            >
+              Share
+            </button>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
 };
 
-export default ConnectionStatus; 
+export default ConnectionStatus;

@@ -1,0 +1,15 @@
+# Optional Render Blueprint: New → Blueprint → paste this file or connect the repo.
+services:
+  - type: web
+    name: video-chat-signaling
+    runtime: node
+    plan: free
+    rootDir: signaling-server
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_VERSION
+        value: 20
+      - key: CORS_ORIGIN
+        sync: false
+    healthCheckPath: /health

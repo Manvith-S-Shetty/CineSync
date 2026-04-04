@@ -5,49 +5,156 @@ const cors = require('cors');
 
 const app = express();
 const server = http.createServer(app);
-app.use(cors());
+/**
+ * CORS for Express + Socket.IO.
+ * Production: set CORS_ORIGIN to your frontend origin(s), comma-separated, no trailing slash.
+ */
+function getCorsAllowedOrigins() {
+    const raw = process.env.CORS_ORIGIN;
+    if (raw && String(raw).trim()) {
+        return String(raw)
+            .split(',')
+            .map((s) => s.trim())
+            .filter(Boolean);
+    }
+    return null;
+}
+
+function getSocketCorsOrigin() {
+    const explicit = getCorsAllowedOrigins();
+    if (explicit && explicit.length) {
+        return explicit;
+    }
+
+    if (process.env.RENDER === 'true' || process.env.NODE_ENV === 'production') {
+        console.warn(
+            '[signaling] CORS_ORIGIN is not set. Browsers may block Socket.IO. Set CORS_ORIGIN=https://your-app.vercel.app'
+        );
+    }
+
+    return [
+        'http://localhost:5173',
+        'http://127.0.0.1:5173',
+        /^http:\/\/192\.168\.\d{1,3}\.\d{1,3}:5173$/,
+        /^http:\/\/10\.\d{1,3}\.\d{1,3}\.\d{1,3}:5173$/,
+        /^http:\/\/172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}:5173$/,
+    ];
+}
+
+const corsOriginOption = getSocketCorsOrigin();
+app.use(
+    cors({
+        origin: corsOriginOption,
+        credentials: true,
+    })
+);
+
+app.get('/health', (_req, res) => {
+    res.status(200).json({ ok: true, service: 'signaling-server' });
+});
+
+app.get('/', (_req, res) => {
+    res.status(200).json({
+        ok: true,
+        service: 'signaling-server',
+        health: '/health',
+    });
+});
 
 const io = socketIO(server, {
     cors: {
-        origin: "http://localhost:5173",
-        methods: ["GET", "POST"],
-        credentials: true
-    }
+        origin: corsOriginOption,
+        methods: ['GET', 'POST'],
+        credentials: true,
+    },
 });
 
 const rooms = new Map(); // Track rooms and their participants
 const users = new Map(); // Track user details
 const roomMessages = new Map();
+/** roomId -> Firebase uid of current host (first user in room; migrates when host leaves) */
+const roomHostFirebaseUid = new Map();
+
+const ALLOWED_REACTIONS = new Set(['❤️', '😂', '🔥', '😮']);
+
+const MAX_WATCH_VIDEO_URL_LEN = 2048;
+const WATCH_VIDEO_EXTENSIONS = ['.mp4', '.webm', '.ogg'];
+/** roomId -> shared direct video URL for watch sync (host-set only) */
+const roomWatchVideoUrl = new Map();
+
+function isYouTubeHostname(hostname) {
+    const h = String(hostname || '').toLowerCase();
+    return (
+        h === 'youtube.com' ||
+        h === 'www.youtube.com' ||
+        h === 'm.youtube.com' ||
+        h === 'youtu.be' ||
+        h === 'www.youtu.be' ||
+        h.endsWith('.youtube.com')
+    );
+}
+
+function isAllowedWatchVideoUrl(url) {
+    if (typeof url !== 'string' || url.length === 0 || url.length > MAX_WATCH_VIDEO_URL_LEN) {
+        return false;
+    }
+    let parsed;
+    try {
+        parsed = new URL(url);
+    } catch {
+        return false;
+    }
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+        return false;
+    }
+    if (isYouTubeHostname(parsed.hostname)) {
+        return false;
+    }
+    const path = parsed.pathname.toLowerCase();
+    return WATCH_VIDEO_EXTENSIONS.some((ext) => path.endsWith(ext));
+}
 
 io.on('connection', (socket) => {
     console.log('New user connected:', socket.id);
 
     // Create or join a room
-    socket.on('createRoom', ({ username }) => {
-        if (!socket.id || !username) {
-            socket.emit('error', { message: 'Invalid socket connection or username' });
+    socket.on('createRoom', ({ username, photoURL, displayName, firebaseUid }) => {
+        if (!socket.id || !firebaseUid) {
+            socket.emit('error', { message: 'Sign in required to create a room' });
             return;
         }
 
         const roomId = generateRoomId();
-        joinRoom(socket, { roomId, username, isHost: true });
-        socket.emit('roomCreated', { 
+        roomHostFirebaseUid.set(roomId, firebaseUid);
+        const name = (displayName || username || 'Guest').trim() || 'Guest';
+        joinRoom(socket, {
+            roomId,
+            username: name,
+            displayName: name,
+            photoURL: photoURL || '',
+            firebaseUid,
+            isHost: true,
+        });
+        socket.emit('roomCreated', {
             roomId,
             user: {
                 id: socket.id,
-                username,
-                isHost: true
-            }
+                username: name,
+                displayName: name,
+                photoURL: photoURL || '',
+                isHost: true,
+            },
         });
     });
 
     // Join existing room
-    socket.on('joinRoom', ({ roomId, username }) => {
-        console.log(`Join room attempt - Room: ${roomId}, User: ${username}, SocketId: ${socket.id}`);
-        
-        if (!socket.id || !roomId || !username) {
-            console.error('Missing required data:', { socketId: socket.id, roomId, username });
-            socket.emit('error', { message: 'Invalid connection data' });
+    socket.on('joinRoom', ({ roomId, username, photoURL, displayName, firebaseUid }) => {
+        const name = (displayName || username || 'Guest').trim() || 'Guest';
+        console.log(`Join room attempt - Room: ${roomId}, User: ${name}, SocketId: ${socket.id}`);
+
+        if (!socket.id || !roomId || !firebaseUid) {
+            console.error('Missing required data:', { socketId: socket.id, roomId, firebaseUid });
+            socket.emit('error', { message: 'Sign in required to join a room' });
             return;
         }
 
@@ -58,9 +165,16 @@ io.on('connection', (socket) => {
         }
 
         try {
-            // Join the room
-            joinRoom(socket, { roomId, username, isHost: false });
-            console.log(`User ${username} (${socket.id}) joined room ${roomId} successfully`);
+            const isHost = roomHostFirebaseUid.get(roomId) === firebaseUid;
+            joinRoom(socket, {
+                roomId,
+                username: name,
+                displayName: name,
+                photoURL: photoURL || '',
+                firebaseUid,
+                isHost,
+            });
+            console.log(`User ${name} (${socket.id}) joined room ${roomId} successfully (host=${isHost})`);
         } catch (error) {
             console.error('Error joining room:', error);
             socket.emit('error', { message: 'Failed to join room' });
@@ -122,13 +236,120 @@ io.on('connection', (socket) => {
         }
     });
 
+    // Watch party video synchronization
+    socket.on('videoPlay', ({ roomId, currentTime }) => {
+        if (!roomId || typeof currentTime !== 'number') {
+            console.error('Invalid videoPlay data');
+            return;
+        }
+
+        const actor = users.get(socket.id);
+        if (!actor?.isHost || actor.roomId !== roomId || !rooms.has(roomId)) return;
+
+        socket.to(roomId).emit('videoPlay', {
+            currentTime,
+            userId: socket.id
+        });
+    });
+
+    socket.on('videoPause', ({ roomId, currentTime }) => {
+        if (!roomId || typeof currentTime !== 'number') {
+            console.error('Invalid videoPause data');
+            return;
+        }
+
+        const actor = users.get(socket.id);
+        if (!actor?.isHost || actor.roomId !== roomId || !rooms.has(roomId)) return;
+
+        socket.to(roomId).emit('videoPause', {
+            currentTime,
+            userId: socket.id
+        });
+    });
+
+    socket.on('videoSeek', ({ roomId, currentTime }) => {
+        if (!roomId || typeof currentTime !== 'number') {
+            console.error('Invalid videoSeek data');
+            return;
+        }
+
+        const actor = users.get(socket.id);
+        if (!actor?.isHost || actor.roomId !== roomId || !rooms.has(roomId)) return;
+
+        socket.to(roomId).emit('videoSeek', {
+            currentTime,
+            userId: socket.id
+        });
+    });
+
+    /** Host-only periodic time sync (watch party drift correction) */
+    socket.on('videoHostSync', ({ roomId, currentTime }) => {
+        if (!roomId || typeof currentTime !== 'number') return;
+        const user = users.get(socket.id);
+        if (!user?.isHost || user.roomId !== roomId || !rooms.has(roomId)) return;
+        socket.to(roomId).emit('videoHostSync', {
+            currentTime,
+            fromHost: true,
+        });
+    });
+
+    /** Host shares a direct video URL so guests (and late joiners) stay on the same file */
+    socket.on('watchVideoUrl', ({ roomId, videoUrl }) => {
+        const user = users.get(socket.id);
+        if (!user?.isHost || user.roomId !== roomId || !rooms.has(roomId)) {
+            return;
+        }
+
+        if (videoUrl == null || videoUrl === '') {
+            roomWatchVideoUrl.delete(roomId);
+            socket.to(roomId).emit('watchVideoUrl', { videoUrl: null });
+            console.log('[watchVideoUrl] cleared for room', roomId);
+            return;
+        }
+
+        if (!isAllowedWatchVideoUrl(videoUrl)) {
+            console.warn('[watchVideoUrl] rejected invalid URL from host', roomId);
+            return;
+        }
+
+        roomWatchVideoUrl.set(roomId, videoUrl);
+        socket.to(roomId).emit('watchVideoUrl', { videoUrl });
+        console.log('[watchVideoUrl] broadcast for room', roomId);
+    });
+
     // Handle chat messages
+    socket.on('chatTyping', ({ roomId, isTyping }) => {
+        const user = users.get(socket.id);
+        if (!user || !rooms.has(roomId)) return;
+        socket.to(roomId).emit('peerTyping', {
+            userId: socket.id,
+            username: user.displayName || user.username,
+            isTyping: !!isTyping,
+        });
+    });
+
+    socket.on('watchReaction', ({ roomId, emoji }) => {
+        const user = users.get(socket.id);
+        if (!user || !rooms.has(roomId)) return;
+        if (!emoji || !ALLOWED_REACTIONS.has(emoji)) return;
+        io.to(roomId).emit('watchReaction', {
+            emoji,
+            userId: socket.id,
+            username: user.displayName || user.username,
+            photoURL: user.photoURL || '',
+        });
+    });
+
     socket.on('chatMessage', ({ roomId, message }) => {
         const user = users.get(socket.id);
         if (user && rooms.has(roomId)) {
             const messageData = {
+                id: `${Date.now()}-${socket.id.slice(0, 8)}`,
                 userId: socket.id,
+                firebaseUid: user.firebaseUid || '',
                 username: user.username,
+                displayName: user.displayName || user.username,
+                photoURL: user.photoURL || '',
                 text: message,
                 timestamp: new Date().toISOString(),
                 isHost: user.isHost
@@ -162,7 +383,8 @@ io.on('connection', (socket) => {
             // Clean up the room
             if (rooms.has(roomId)) {
                 rooms.delete(roomId);
-                // Clear room messages
+                roomHostFirebaseUid.delete(roomId);
+                roomWatchVideoUrl.delete(roomId);
                 if (roomMessages.has(roomId)) {
                     roomMessages.delete(roomId);
                 }
@@ -184,75 +406,110 @@ function generateRoomId() {
     return Math.random().toString(36).substring(2, 8).toUpperCase();
 }
 
-function joinRoom(socket, { roomId, username, isHost }) {
-    if (!socket.id || !roomId || !username) {
+function joinRoom(socket, { roomId, username, isHost, photoURL, displayName, firebaseUid }) {
+    if (!socket.id || !roomId || !username || !firebaseUid) {
         throw new Error('Missing required connection data');
     }
 
-    console.log('Joining room:', { socketId: socket.id, roomId, username, isHost });
+    const disp = displayName || username;
+    console.log('Joining room:', { socketId: socket.id, roomId, username: disp, isHost });
 
-    // Create room if it doesn't exist
     if (!rooms.has(roomId)) {
         rooms.set(roomId, new Set());
     }
 
-    // Add user to room
     rooms.get(roomId).add(socket.id);
     socket.join(roomId);
 
-    // Store user details
     const userData = {
         id: socket.id,
-        username,
+        username: disp,
+        displayName: disp,
+        photoURL: photoURL || '',
         roomId,
-        isHost
+        isHost,
+        firebaseUid,
     };
     users.set(socket.id, userData);
 
-    // Get all users in the room
     const usersInRoom = Array.from(rooms.get(roomId))
-        .map(id => users.get(id))
-        .filter(user => user && user.id !== socket.id);
+        .map((id) => users.get(id))
+        .filter((user) => user && user.id !== socket.id);
 
     console.log('Users in room:', usersInRoom);
 
-    // Send room info to the new user
+    const chatHistory = roomMessages.has(roomId) ? roomMessages.get(roomId) : [];
+    const watchVideoUrl = roomWatchVideoUrl.has(roomId)
+        ? roomWatchVideoUrl.get(roomId)
+        : null;
+
     socket.emit('roomJoined', {
         roomId,
         users: usersInRoom,
         isHost,
-        user: userData
+        user: userData,
+        chatHistory,
+        watchVideoUrl,
     });
 
-    // Notify others in the room
     socket.to(roomId).emit('userJoined', {
-        user: userData
+        user: userData,
     });
 }
 
 function handleDisconnect(socket) {
     const user = users.get(socket.id);
-    if (user) {
-        const { roomId } = user;
-        
-        // Remove user from room
-        if (rooms.has(roomId)) {
-            rooms.get(roomId).delete(socket.id);
-            if (rooms.get(roomId).size === 0) {
-                rooms.delete(roomId);
+    if (!user) return;
+
+    const { roomId, firebaseUid } = user;
+
+    if (rooms.has(roomId)) {
+        const memberSet = rooms.get(roomId);
+        const hostUid = roomHostFirebaseUid.get(roomId);
+        const wasRoomHost = hostUid && firebaseUid && hostUid === firebaseUid;
+
+        memberSet.delete(socket.id);
+
+        if (memberSet.size === 0) {
+            rooms.delete(roomId);
+            roomHostFirebaseUid.delete(roomId);
+            roomWatchVideoUrl.delete(roomId);
+            if (roomMessages.has(roomId)) {
+                roomMessages.delete(roomId);
+            }
+        } else if (wasRoomHost) {
+            const nextSocketId = memberSet.values().next().value;
+            const nextUser = users.get(nextSocketId);
+            if (nextUser?.firebaseUid) {
+                roomHostFirebaseUid.set(roomId, nextUser.firebaseUid);
+                for (const id of memberSet) {
+                    const u = users.get(id);
+                    if (u) u.isHost = u.firebaseUid === nextUser.firebaseUid;
+                }
+                io.to(roomId).emit('hostChanged', {
+                    hostFirebaseUid: nextUser.firebaseUid,
+                    hostDisplayName: nextUser.displayName || nextUser.username,
+                });
             }
         }
-
-        // Remove user from users map
-        users.delete(socket.id);
-
-        // Notify others in the room
-        socket.to(roomId).emit('userLeft', {
-            id: socket.id,
-            username: user.username,
-            isHost: user.isHost
-        });
     }
+
+    users.delete(socket.id);
+
+    socket.to(roomId).emit('userLeft', {
+        id: socket.id,
+        username: user.username,
+        isHost: user.isHost,
+    });
 }
 
-server.listen(5000, () => console.log('Server running on port 5000'));
+const HOST = process.env.HOST || '0.0.0.0';
+const PORT = Number.parseInt(process.env.PORT, 10) || 5000;
+server.listen(PORT, HOST, () => {
+    console.log(
+        `[signaling] listening on http://${HOST === '0.0.0.0' ? '0.0.0.0 (all interfaces)' : HOST}:${PORT}`
+    );
+    if (getCorsAllowedOrigins()) {
+        console.log('[signaling] CORS_ORIGIN:', getCorsAllowedOrigins().join(', '));
+    }
+});

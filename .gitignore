@@ -1,0 +1,8 @@
+node_modules/
+.env
+video-chat-frontend/.env
+dist/
+build/
+.vscode/
+.DS_Store
+npm-debug.log*

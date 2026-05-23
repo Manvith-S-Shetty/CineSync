@@ -42,19 +42,19 @@ Ensure the following are installed:
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/HabibAdavize/Video-Chat-WebRTC.git
-   cd Video-Chat-WebRTC
+   git clone (https://github.com/Manvith-S-Shetty/CineSync.git)
+   cd Video-Chat
    ```
 
 2. Install frontend dependencies:
    ```bash
-   cd client
+   cd NavPanel
    npm install
    ```
 
 3. Install backend dependencies:
    ```bash
-   cd ../server
+   cd ../VisionBridge
    npm install
    ```
 
@@ -136,8 +136,8 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## Contact
 
-- **Habib Adavize** - [@HabibAdavize](https://github.com/HabibAdavize)
-- **Project Link**: [Video Chat WebRTC](https://github.com/HabibAdavize/Video-Chat-WebRTC)
+- **Manvith S Shetty** - [@Manvith-S-Shetty](https://github.com/Manvith-S-Shetty)
+- **Project Link**: [Video Chat WebRTC](https://github.com/Manvith-S-Shetty/CineSync)
 
 ## Acknowledgments
 

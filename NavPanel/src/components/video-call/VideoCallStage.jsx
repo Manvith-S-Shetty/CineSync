@@ -188,18 +188,18 @@ export default function VideoCallStage({
 
     return (
       <div
-        className={`video-tile video-tile--${isMax ? 'focus' : variant} ${pinActive(tileId) ? 'video-tile--user-pinned' : ''}`}
+        className={`video-tile video-tile--${isMax ? 'focus' : variant} ${pinActive(tileId) ? 'video-tile--user-pinned' : ''} relative group`}
       >
         {children}
         {isScreen ? (
-          <span className="video-tile__badge video-tile__badge--screen">Screen</span>
+          <span className="video-tile__badge video-tile__badge--screen z-10">Screen</span>
         ) : null}
-        {pinActive(tileId) ? <span className="video-tile__badge">Pinned</span> : null}
-        <div className="video-tile__actions">
+        {pinActive(tileId) ? <span className="video-tile__badge z-10">Pinned</span> : null}
+        <div className="absolute top-2 right-2 flex gap-2 opacity-0 group-hover:opacity-100 transition z-20">
           {showMax ? (
             <button
               type="button"
-              className="video-tile__icon-btn"
+              className="bg-black/60 text-white p-2 rounded-lg hover:bg-black flex items-center justify-center text-sm"
               title="Maximize"
               aria-label="Maximize video"
               onClick={(e) => {
@@ -207,7 +207,24 @@ export default function VideoCallStage({
                 onMaximizeTile(tileId);
               }}
             >
-              <span className="material-symbols-outlined">open_in_full</span>
+              ⛶
+            </button>
+          ) : null}
+          {showPin ? (
+            <button
+              type="button"
+              className="bg-black/60 text-white p-2 rounded-lg hover:bg-black flex items-center justify-center text-sm"
+              title="Click to pin or unpin"
+              aria-label={
+                pinActive(tileId) ? 'Unpin video' : 'Pin video to main focus'
+              }
+              aria-pressed={pinActive(tileId)}
+              onClick={(e) => {
+                e.stopPropagation();
+                onPinTile(tileId);
+              }}
+            >
+              🗕
             </button>
           ) : null}
         </div>
@@ -223,7 +240,7 @@ export default function VideoCallStage({
             onClick={() => onPinTile(tileId)}
           />
         ) : null}
-        <div className="video-tile__label">{label}</div>
+        <div className="video-tile__label z-10">{label}</div>
       </div>
     );
   }

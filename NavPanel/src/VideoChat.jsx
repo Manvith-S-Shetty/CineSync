@@ -6,6 +6,7 @@ import ConnectionStatus from './components/ConnectionStatus';
 import ParticipantList from './components/ParticipantList';
 import VideoCallStage from './components/video-call/VideoCallStage';
 import ReactionFloatLayer from './components/ReactionFloatLayer';
+import ErrorCard from './components/ErrorCard';
 import Room from './Room';
 import { LOCAL_TILE_ID, streamHasScreenShareVideo } from './videoCallLayoutUtils';
 import { useAuth } from './contexts/AuthContext';
@@ -246,8 +247,16 @@ const VideoChat = () => {
     const onWatchVideoUrl = ({ videoUrl }) => {
       setSyncedWatchVideoUrl(videoUrl === undefined ? null : videoUrl);
     };
+    const onVideoChange = ({ videoUrl }) => {
+      console.log("[VIDEO CHANGE]", videoUrl);
+      setSyncedWatchVideoUrl(videoUrl === undefined ? null : videoUrl);
+    };
     socket.on('watchVideoUrl', onWatchVideoUrl);
-    return () => socket.off('watchVideoUrl', onWatchVideoUrl);
+    socket.on('videoChange', onVideoChange);
+    return () => {
+      socket.off('watchVideoUrl', onWatchVideoUrl);
+      socket.off('videoChange', onVideoChange);
+    };
   }, []);
 
   const roomIdForTypingRef = useRef(roomId);
@@ -293,11 +302,14 @@ const VideoChat = () => {
     };
 
     const onDisconnect = () => {
+      console.log("[SOCKET DISCONNECTED]");
+      setError("Connection lost. Please refresh.");
       if (wasJoinedRef.current) setSocketReconnecting(true);
       teardownPeers();
     };
 
     const onConnect = () => {
+      console.log("[SOCKET CONNECTED]", socket.id);
       setSocketReconnecting(false);
       const payload = rejoinPayloadRef.current;
       if (wasJoinedRef.current && payload && isJoinedRef.current) {
@@ -487,6 +499,7 @@ const VideoChat = () => {
     } catch (err) {
       console.error('Media error:', err?.name, err?.message);
       console.error('[Enable Camera] failed', err);
+      setError("Camera access denied or not available");
       setMediaError(messageFromMediaError(err));
       setMediaMode('no-media');
     } finally {
@@ -681,11 +694,12 @@ const VideoChat = () => {
         return;
       }
       const rid = (joinRoomId || '').trim();
-      if (!rid) {
-        setError('Enter a room ID.');
+      if (!rid || rid.length < 4) {
+        setError('Invalid Room ID');
         return;
       }
       const payload = buildJoinPayload(rid);
+      console.log("[JOIN ROOM]", rid);
       console.log('Attempting to join room:', { roomId: rid });
       socket.emit('joinRoom', payload);
       setConnectionStatus('connecting');
@@ -755,6 +769,7 @@ const VideoChat = () => {
         return;
       }
       setRoomId(roomId);
+      setError(null);
       setIsHost(true);
       setConnectionStatus('connected');
       setIsJoined(true);
@@ -766,7 +781,7 @@ const VideoChat = () => {
       alert(`Room created! Room ID: ${roomId} (copied to clipboard)`);
     });
 
-    socket.on('roomJoined', ({ roomId, users, isHost, chatHistory, watchVideoUrl: sharedWatchUrl }) => {
+    socket.on('roomJoined', ({ roomId, users, isHost, chatHistory, watchVideoUrl: sharedWatchUrl, videoUrl }) => {
       console.log('Room joined event received:', { roomId, users, isHost });
       
       if (!roomId || !Array.isArray(users)) {
@@ -775,6 +790,7 @@ const VideoChat = () => {
       }
 
       setRoomId(roomId);
+      setError(null);
       setIsHost(isHost);
       setParticipants(users.filter(user => user && user.id));
       setConnectionStatus('connected');
@@ -784,7 +800,9 @@ const VideoChat = () => {
       if (payload) rejoinPayloadRef.current = payload;
       setChatMessages(Array.isArray(chatHistory) ? chatHistory : []);
       setSyncedWatchVideoUrl(
-        sharedWatchUrl === undefined || sharedWatchUrl === null ? null : sharedWatchUrl
+        (videoUrl ?? sharedWatchUrl) === undefined || (videoUrl ?? sharedWatchUrl) === null
+          ? null
+          : (videoUrl ?? sharedWatchUrl)
       );
 
       // Joiner offers to everyone already in the room (use event roomId — state may not have updated yet)
@@ -912,6 +930,12 @@ const VideoChat = () => {
       setConnectionStatus('disconnected');
     });
 
+    socket.on('errorMessage', (data) => {
+      const msg = typeof data === 'string' ? data : (data?.message || 'Something went wrong');
+      setError(msg);
+      setConnectionStatus('disconnected');
+    });
+
     socket.on('userSpeaking', ({ userId, speaking }) => {
       handleSpeakingStateChange(userId, speaking);
     });
@@ -964,6 +988,7 @@ const VideoChat = () => {
       socket.off('peerTyping');
       socket.off('watchReaction');
       socket.off('hostChanged');
+      socket.off('errorMessage');
     };
   }, [roomId, initiateCall, createPeerConnection, flushPendingIceCandidates, enqueueIceCandidate, buildJoinPayload]);
 
@@ -1131,6 +1156,7 @@ const VideoChat = () => {
       socket.emit('videoStateChange', { roomId, isVideoOff: false });
     } catch (err) {
       console.error('[toggleVideo] camera on failed', err?.name, err?.message);
+      setError("Camera access denied or not available");
       setMediaError(messageFromMediaError(err));
     } finally {
       mediaAcquireInProgressRef.current = false;
@@ -1445,18 +1471,6 @@ const VideoChat = () => {
     return () => clearInterval(interval);
   }, []);
 
-  // Add a retry button to the error container
-  const ErrorContainer = ({ error, onRetry, onDismiss }) => (
-    <div className="error-container">
-      <h2>Error</h2>
-      <p>{error}</p>
-      <div className="error-buttons">
-        <button onClick={onRetry}>Try Again</button>
-        <button onClick={onDismiss}>Continue Without Camera</button>
-      </div>
-    </div>
-  );
-
   // Add this function to detect active speaker
   const handleSpeakingStateChange = useCallback((userId, speaking) => {
     if (speaking) {
@@ -1709,32 +1723,10 @@ const VideoChat = () => {
     return `${names[0]} and ${names.length - 1} others are typing…`;
   }, [typingPeers]);
 
-  // Render functions
-  if (error) {
-    return (
-      <div className="flex h-full min-h-0 w-full">
-      <ErrorContainer 
-        error={error}
-        onRetry={async () => {
-          setError(null);
-          setVideoError(false);
-          setMediaWarning('Continuing without camera');
-          setMediaError('');
-        }}
-        onDismiss={() => {
-          setError(null);
-          setVideoError(true);
-          setMediaWarning('Continuing without camera');
-          setMediaError('');
-        }}
-      />
-      </div>
-    );
-  }
-
   if (!isJoined) {
     return (
       <div className="flex min-h-0 w-full flex-1 flex-col overflow-auto video-chat-root video-chat-root--join">
+        {error ? <ErrorCard message={error} /> : null}
         {renderMediaErrorBanner()}
         {mediaWarning ? <div className="status-error">{mediaWarning}</div> : null}
         <div className="media-mode-row media-mode-row--join">{renderMediaModeBadge()}</div>
@@ -1746,6 +1738,7 @@ const VideoChat = () => {
 
   return (
     <div className="flex min-h-0 w-full flex-1 flex-col overflow-hidden video-chat-root">
+      {error ? <ErrorCard message={error} /> : null}
       <ReactionFloatLayer trigger={reactionTrigger} />
       <ConnectionStatus
         status={connectionStatus}
@@ -1771,6 +1764,7 @@ const VideoChat = () => {
         roomId={roomId}
         isHost={isHost}
         syncedWatchVideoUrl={syncedWatchVideoUrl}
+        setError={setError}
         mediaWarning={mediaWarning}
         videoCall={
           <div className="flex h-full min-h-0 flex-col gap-2 overflow-hidden px-1 md:px-2">

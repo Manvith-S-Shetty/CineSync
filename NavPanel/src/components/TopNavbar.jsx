@@ -44,7 +44,7 @@ export default function TopNavbar({
         <div className="ml-auto flex min-w-0 flex-[1_1_280px] flex-wrap items-center justify-end gap-2.5 md:flex-[1_1_420px]">
           {guest ? (
             <p className="m-0 max-w-[320px] text-right text-[11px] font-medium leading-snug text-amber-200/90 md:text-xs">
-              Only the host can change the video. Playback stays synced from the host.
+              Only host can control video
             </p>
           ) : null}
           <input

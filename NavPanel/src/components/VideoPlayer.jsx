@@ -25,6 +25,7 @@ const VideoPlayer = forwardRef(function VideoPlayer(
     isHost = false,
     syncedWatchVideoUrl = null,
     fileInputId = '',
+    setError,
   },
   ref
 ) {
@@ -52,6 +53,7 @@ const VideoPlayer = forwardRef(function VideoPlayer(
   const broadcastWatchUrl = useCallback(
     (videoUrl) => {
       if (!isHost || !roomId || !socket.connected) return;
+      socket.emit('videoChange', { roomId, videoUrl });
       socket.emit('watchVideoUrl', { roomId, videoUrl });
     },
     [isHost, roomId]
@@ -211,7 +213,15 @@ const VideoPlayer = forwardRef(function VideoPlayer(
 
   const loadUrl = useCallback(
     (raw) => {
+      if (!socket || !socket.connected) {
+        if (setError) setError("Server not connected");
+        return { ok: false };
+      }
       const rawStr = typeof raw === 'string' ? raw : String(raw ?? '');
+      if (!rawStr) {
+        if (setError) setError("No video URL provided");
+        return { ok: false };
+      }
       console.log('[VideoPlayer] loadUrl called', {
         length: rawStr.length,
         preview: rawStr.trim().slice(0, 120),
@@ -485,10 +495,20 @@ const VideoPlayer = forwardRef(function VideoPlayer(
               onLoadStart={() =>
                 console.log('[VideoPlayer] onLoadStart', { src: videoSrcRef.current })
               }
-              onPlay={handlePlay}
-              onPause={handlePause}
+              onPlay={(e) => {
+                console.log("[VIDEO PLAY]");
+                handlePlay(e);
+              }}
+              onPause={(e) => {
+                console.log("[VIDEO PAUSE]");
+                handlePause(e);
+              }}
               onSeeked={handleSeek}
-              onTimeUpdate={(e) => setCurrentTime(e.target.currentTime || 0)}
+              onTimeUpdate={(e) => {
+                const time = e.target.currentTime || 0;
+                console.log("[TIME]", time);
+                setCurrentTime(time);
+              }}
               onLoadedMetadata={(e) => {
                 const d = e.target.duration || 0;
                 setDuration(d);

@@ -13,6 +13,7 @@ export default function Room({
   participants,
   isHost,
   syncedWatchVideoUrl = null,
+  setError,
 }) {
   const vpRef = useRef(null);
   const fileInputId = 'room-load-video-file';
@@ -55,6 +56,7 @@ export default function Room({
             fileInputId={fileInputId}
             isExpanded={isExpanded}
             onToggleExpand={() => setIsExpanded((v) => !v)}
+            setError={setError}
           />
         </VideoStage>
       </div>

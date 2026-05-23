@@ -84,6 +84,8 @@ const MAX_WATCH_VIDEO_URL_LEN = 2048;
 const WATCH_VIDEO_EXTENSIONS = ['.mp4', '.webm', '.ogg'];
 /** roomId -> shared direct video URL for watch sync (host-set only) */
 const roomWatchVideoUrl = new Map();
+/** roomId -> current room video URL (alias used by videoChange event) */
+const roomVideo = new Map();
 
 function isYouTubeHostname(hostname) {
     const h = String(hostname || '').toLowerCase();
@@ -119,6 +121,7 @@ function isAllowedWatchVideoUrl(url) {
 
 io.on('connection', (socket) => {
     console.log('New user connected:', socket.id);
+    console.log('[SOCKET CONNECTED]', socket.id);
 
     // Create or join a room
     socket.on('createRoom', ({ username, photoURL, displayName, firebaseUid }) => {
@@ -157,12 +160,14 @@ io.on('connection', (socket) => {
 
         if (!socket.id || !roomId || !firebaseUid) {
             console.error('Missing required data:', { socketId: socket.id, roomId, firebaseUid });
+            socket.emit('errorMessage', { message: 'Sign in required to join a room' });
             socket.emit('error', { message: 'Sign in required to join a room' });
             return;
         }
 
         if (!rooms.has(roomId)) {
             console.error(`Room not found: ${roomId}`);
+            socket.emit('errorMessage', 'Room does not exist');
             socket.emit('error', { message: 'Room not found' });
             return;
         }
@@ -180,6 +185,7 @@ io.on('connection', (socket) => {
             console.log(`User ${name} (${socket.id}) joined room ${roomId} successfully (host=${isHost})`);
         } catch (error) {
             console.error('Error joining room:', error);
+            socket.emit('errorMessage', { message: 'Failed to join room' });
             socket.emit('error', { message: 'Failed to join room' });
         }
     });
@@ -305,6 +311,8 @@ io.on('connection', (socket) => {
 
         if (videoUrl == null || videoUrl === '') {
             roomWatchVideoUrl.delete(roomId);
+            roomVideo.delete(roomId);
+            socket.to(roomId).emit('videoChange', { videoUrl: null });
             socket.to(roomId).emit('watchVideoUrl', { videoUrl: null });
             console.log('[watchVideoUrl] cleared for room', roomId);
             return;
@@ -316,8 +324,30 @@ io.on('connection', (socket) => {
         }
 
         roomWatchVideoUrl.set(roomId, videoUrl);
+        roomVideo.set(roomId, videoUrl);
+        socket.to(roomId).emit('videoChange', { videoUrl });
         socket.to(roomId).emit('watchVideoUrl', { videoUrl });
         console.log('[watchVideoUrl] broadcast for room', roomId);
+    });
+
+    /** Backward-compatible event name used by some clients */
+    socket.on('videoChange', ({ roomId, videoUrl }) => {
+        const user = users.get(socket.id);
+        if (!user?.isHost || user.roomId !== roomId || !rooms.has(roomId)) return;
+
+        if (videoUrl == null || videoUrl === '') {
+            roomVideo.delete(roomId);
+            roomWatchVideoUrl.delete(roomId);
+            socket.to(roomId).emit('videoChange', { videoUrl: null });
+            socket.to(roomId).emit('watchVideoUrl', { videoUrl: null });
+            return;
+        }
+
+        if (!isAllowedWatchVideoUrl(videoUrl)) return;
+        roomVideo.set(roomId, videoUrl);
+        roomWatchVideoUrl.set(roomId, videoUrl);
+        socket.to(roomId).emit('videoChange', { videoUrl });
+        socket.to(roomId).emit('watchVideoUrl', { videoUrl });
     });
 
     // Handle chat messages
@@ -388,6 +418,7 @@ io.on('connection', (socket) => {
                 rooms.delete(roomId);
                 roomHostFirebaseUid.delete(roomId);
                 roomWatchVideoUrl.delete(roomId);
+                roomVideo.delete(roomId);
                 if (roomMessages.has(roomId)) {
                     roomMessages.delete(roomId);
                 }
@@ -442,8 +473,8 @@ function joinRoom(socket, { roomId, username, isHost, photoURL, displayName, fir
     console.log('Users in room:', usersInRoom);
 
     const chatHistory = roomMessages.has(roomId) ? roomMessages.get(roomId) : [];
-    const watchVideoUrl = roomWatchVideoUrl.has(roomId)
-        ? roomWatchVideoUrl.get(roomId)
+    const watchVideoUrl = roomVideo.has(roomId)
+        ? roomVideo.get(roomId)
         : null;
 
     socket.emit('roomJoined', {
@@ -453,7 +484,12 @@ function joinRoom(socket, { roomId, username, isHost, photoURL, displayName, fir
         user: userData,
         chatHistory,
         watchVideoUrl,
+        videoUrl: watchVideoUrl,
     });
+
+    if (watchVideoUrl) {
+        socket.emit('videoChange', { videoUrl: watchVideoUrl });
+    }
 
     socket.to(roomId).emit('userJoined', {
         user: userData,
@@ -477,6 +513,7 @@ function handleDisconnect(socket) {
             rooms.delete(roomId);
             roomHostFirebaseUid.delete(roomId);
             roomWatchVideoUrl.delete(roomId);
+            roomVideo.delete(roomId);
             if (roomMessages.has(roomId)) {
                 roomMessages.delete(roomId);
             }

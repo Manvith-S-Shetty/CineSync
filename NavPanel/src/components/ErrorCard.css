@@ -1,0 +1,9 @@
+.error-card {
+  background: white;
+  color: black;
+  padding: 16px;
+  border-radius: 10px;
+  text-align: center;
+  max-width: 300px;
+  margin: 20px auto;
+}

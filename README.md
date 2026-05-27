@@ -42,7 +42,10 @@ Ensure the following are installed:
 
 1. Clone the repository:
    ```bash
-   git clone (https://github.com/Manvith-S-Shetty/CineSync.git)
+
+=======
+   git clone https://github.com/Manvith-S-Shetty/CineSync.git
+>>>>>>> 7b29a8f (Updated frontend)
    cd Video-Chat
    ```
 
@@ -65,7 +68,7 @@ Ensure the following are installed:
 
 5. Start the frontend application:
    ```bash
-   cd ../client
+   cd ../Navpanel
    npm start
    ```
 

@@ -1674,7 +1674,7 @@ const VideoChat = () => {
     return (
       <button
         type="button"
-        className="enable-camera-btn"
+        className="relative z-[60] rounded-[14px] border border-[#4f46e5]/40 bg-gradient-to-br from-[#2563eb] to-[#4f46e5] px-5 py-2.5 text-sm font-semibold tracking-wide text-white shadow-[0_8px_30px_rgba(37,99,235,0.4),0_1px_0_rgba(255,255,255,0.2)_inset] transition-all duration-200 ease-apple hover:-translate-y-[2px] hover:scale-[1.02] hover:shadow-[0_12px_40px_rgba(37,99,235,0.7)] active:translate-y-0 active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none mt-4"
         onClick={() => handleEnableCameraClick()}
         disabled={mediaMode === 'initializing'}
       >
@@ -1778,41 +1778,43 @@ const VideoChat = () => {
                 the camera. Use <strong>Enable Camera</strong> to start again.
               </div>
             ) : null}
-            <div className="video-wrapper video-wrapper--call min-h-0 min-w-0 flex-1">
-              <VideoCallStage
-                participants={participants}
-                remoteStreams={remoteStreams}
-                remoteVideoStates={remoteVideoStates}
-                localStream={localStream}
-                localVideoRef={localVideoRef}
-                isVideoOff={isVideoOff}
-                videoError={videoError}
-                isScreenSharing={isScreenSharing}
-                focusTileId={focusTileId}
-                manualPinTileId={manualPinTileId}
-                onPinTile={handlePinTile}
-                maximizedTileId={maximizedTileId}
-                onMaximizeTile={handleMaximizeTile}
-                onMinimizeTile={handleMinimizeTile}
-                renderEnableCameraButton={renderEnableCameraButton}
-                onLocalVideoError={() => setVideoError(true)}
-              />
-              <div className="controls shrink-0">
-                <button type="button" onClick={toggleAudio}>
+            <div className="video-wrapper video-wrapper--call min-h-[324px] min-w-0 flex-1 flex flex-col gap-4 relative z-10">
+              <div className="relative z-10 flex-1 min-h-0 flex flex-col">
+                <VideoCallStage
+                  participants={participants}
+                  remoteStreams={remoteStreams}
+                  remoteVideoStates={remoteVideoStates}
+                  localStream={localStream}
+                  localVideoRef={localVideoRef}
+                  isVideoOff={isVideoOff}
+                  videoError={videoError}
+                  isScreenSharing={isScreenSharing}
+                  focusTileId={focusTileId}
+                  manualPinTileId={manualPinTileId}
+                  onPinTile={handlePinTile}
+                  maximizedTileId={maximizedTileId}
+                  onMaximizeTile={handleMaximizeTile}
+                  onMinimizeTile={handleMinimizeTile}
+                  renderEnableCameraButton={renderEnableCameraButton}
+                  onLocalVideoError={() => setVideoError(true)}
+                />
+              </div>
+              <div className="controls shrink-0 flex flex-wrap items-center justify-center gap-3 rounded-[24px] bg-white/[0.06] px-6 py-3 shadow-[0_10px_40px_rgba(0,0,0,0.35)] backdrop-blur-xl border border-white/[0.08] mx-auto relative z-50 transition-all duration-300 ease-apple hover:bg-white/[0.08]">
+                <button type="button" onClick={toggleAudio} className="transition-all duration-200 ease-apple hover:shadow-lg hover:shadow-white/10 active:scale-[0.92]">
                   {isAudioMuted ? (
                     <span className="material-symbols-outlined">mic_off</span>
                   ) : (
                     <span className="material-symbols-outlined">mic</span>
                   )}
                 </button>
-                <button type="button" onClick={toggleVideo}>
+                <button type="button" onClick={toggleVideo} className="transition-all duration-200 ease-apple hover:shadow-lg hover:shadow-white/10 active:scale-[0.92]">
                   {isVideoOff ? (
                     <span className="material-symbols-outlined">videocam_off</span>
                   ) : (
                     <span className="material-symbols-outlined">videocam</span>
                   )}
                 </button>
-                <button type="button" onClick={toggleScreenShare}>
+                <button type="button" onClick={toggleScreenShare} className="transition-all duration-200 ease-apple hover:shadow-lg hover:shadow-white/10 active:scale-[0.92]">
                   {isScreenSharing ? (
                     <span className="material-symbols-outlined">stop_screen_share</span>
                   ) : (
@@ -1821,18 +1823,18 @@ const VideoChat = () => {
                 </button>
                 <div className="control-separator" />
                 {isHost ? (
-                  <button type="button" onClick={endCall} className="end-call">
+                  <button type="button" onClick={endCall} className="end-call transition-all duration-200 ease-apple hover:shadow-lg hover:shadow-red-500/20 active:scale-[0.92]">
                     <span className="material-symbols-outlined">call_end</span>
                   </button>
                 ) : (
-                  <button type="button" onClick={leaveCall} className="leave-call">
+                  <button type="button" onClick={leaveCall} className="leave-call transition-all duration-200 ease-apple hover:shadow-lg hover:shadow-red-500/20 active:scale-[0.92]">
                     <span className="material-symbols-outlined">logout</span>
                   </button>
                 )}
                 <button
                   type="button"
                   onClick={() => setShowParticipants(!showParticipants)}
-                  className="participant-toggle"
+                  className="participant-toggle transition-all duration-200 ease-apple hover:shadow-lg hover:shadow-white/10 active:scale-[0.92]"
                 >
                   <span className="material-symbols-outlined">
                     {showParticipants ? 'person_off' : 'people'}
@@ -1845,7 +1847,7 @@ const VideoChat = () => {
         chat={
           <div className="flex h-full min-h-0 flex-col overflow-hidden">
             <div className="message-wrapper min-h-0 min-w-0 flex-1">
-              <div className="message-box" ref={messageBoxRef}>
+              <div className="message-box scroll-smooth px-2" ref={messageBoxRef}>
                 {chatMessages.map((msg) => {
                   const isSelf =
                     (profile?.uid && msg.firebaseUid && msg.firebaseUid === profile.uid) ||
@@ -1853,7 +1855,7 @@ const VideoChat = () => {
                   const label = isSelf ? 'You' : msg.displayName || msg.username || 'Guest';
                   const key = msg.id || `${msg.timestamp}-${msg.userId}`;
                   return (
-                    <div key={key} className={`message ${isSelf ? 'self' : 'other'}`}>
+                    <div key={key} className={`message ${isSelf ? 'self' : 'other'} animate-fade-in-up mb-4 rounded-[16px] bg-white/[0.03] border border-white/[0.03] p-4 shadow-[0_8px_24px_rgba(0,0,0,0.2)] backdrop-blur-xl transition-all duration-300 ease-apple`}>
                       <div className="message__row">
                         {msg.photoURL ? (
                           <img
@@ -1885,15 +1887,16 @@ const VideoChat = () => {
                   {typingIndicatorText}
                 </div>
               ) : null}
-              <div className="message-input">
+              <div className="message-input mt-2 flex gap-2">
                 <input
                   type="text"
                   value={message}
                   onChange={handleChatInputChange}
                   onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
                   placeholder="Type your message..."
+                  className="flex-1 rounded-[14px] border border-white/[0.04] bg-white/[0.03] px-4 py-2.5 text-sm text-zinc-100 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)] placeholder:text-zinc-400 outline-none ring-0 backdrop-blur-xl transition-all duration-300 ease-apple focus:border-[#4f46e5]/40 focus:bg-white/[0.05] focus:ring-2 focus:ring-[#2563eb]/40"
                 />
-                <button type="button" onClick={sendMessage}>
+                <button type="button" onClick={sendMessage} className="rounded-[14px] border border-[#4f46e5]/40 bg-gradient-to-br from-[#2563eb] to-[#4f46e5] px-5 py-2.5 text-sm font-semibold text-white shadow-[0_8px_30px_rgba(37,99,235,0.4),0_1px_0_rgba(255,255,255,0.2)_inset] transition-all duration-300 ease-apple hover:-translate-y-[2px] hover:scale-[1.02] hover:shadow-[0_12px_40px_rgba(37,99,235,0.7)] active:translate-y-0 active:scale-[0.98]">
                   Send
                 </button>
               </div>

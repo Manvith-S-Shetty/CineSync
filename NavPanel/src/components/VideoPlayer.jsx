@@ -15,6 +15,8 @@ import {
 import '../styles/VideoPlayer.css';
 
 const LOAD_FAILED_MESSAGE = 'Video failed to load';
+const HOST_SYNC_INTERVAL_MS = 1000;
+const HOST_SYNC_SEEK_TOLERANCE_SECONDS = 0.75;
 
 const VideoPlayer = forwardRef(function VideoPlayer(
   {
@@ -410,11 +412,13 @@ const VideoPlayer = forwardRef(function VideoPlayer(
     const id = window.setInterval(() => {
       const el = videoRef.current;
       if (!el || isSyncingRef.current) return;
+      const hostTime = el.currentTime || 0;
+      console.log('[SYNC SEND]', { roomId, currentTime: hostTime });
       socket.emit('videoHostSync', {
         roomId,
-        currentTime: el.currentTime || 0,
+        currentTime: hostTime,
       });
-    }, 2000);
+    }, HOST_SYNC_INTERVAL_MS);
     return () => window.clearInterval(id);
   }, [roomId, isHost]);
 
@@ -423,8 +427,11 @@ const VideoPlayer = forwardRef(function VideoPlayer(
     const onHostSync = ({ currentTime: t }) => {
       const el = videoRef.current;
       if (!el || typeof t !== 'number' || isSyncingRef.current) return;
-      const drift = Math.abs((el.currentTime || 0) - t);
-      if (drift <= 1) return;
+      const localTime = el.currentTime || 0;
+      const drift = Math.abs(localTime - t);
+      console.log('[SYNC RECEIVE]', { roomId, hostTime: t, localTime });
+      console.log('[TIME DIFF]', { roomId, diff: drift });
+      if (drift <= HOST_SYNC_SEEK_TOLERANCE_SECONDS) return;
       isSyncingRef.current = true;
       el.currentTime = t;
       setCurrentTime(t);
@@ -576,14 +583,14 @@ const VideoPlayer = forwardRef(function VideoPlayer(
 
   if (playerOnly) {
     return (
-      <div className="watch-player watch-player--player-only h-full w-full flex flex-col min-h-0">
+      <div className="watch-player animate-zoom-in watch-player--player-only h-full w-full flex flex-col min-h-0">
         {videoBlock}
       </div>
     );
   }
 
   return (
-    <div className="watch-player h-full w-full flex flex-col min-h-0">
+    <div className="watch-player animate-zoom-in h-full w-full flex flex-col min-h-0">
       <div className="watch-player-header">
         <h3>Watch Party</h3>
         <span className="watch-player-status">

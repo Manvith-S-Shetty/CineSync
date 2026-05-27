@@ -24,8 +24,8 @@ const RoomJoin = ({ onJoinRoom, onCreateRoom }) => {
     };
 
     return (
-        <div className="room-join-container">
-            <div className="room-join-card">
+        <div className="room-join-container animate-fade-in backdrop-blur-sm">
+            <div className="room-join-card animate-modal-in transition-all duration-300 ease-apple">
                 <h2>{isCreating ? 'Create Room' : 'Join Room'}</h2>
                 {profile ? (
                     <p className="room-join-signed-in">
@@ -46,12 +46,12 @@ const RoomJoin = ({ onJoinRoom, onCreateRoom }) => {
                             />
                         </div>
                     )}
-                    <button type="submit" className="brutalist-button">
+                    <button type="submit" className="brutalist-button transition-all duration-200 ease-apple hover:-translate-y-[1px] hover:scale-[1.02] hover:shadow-lg active:scale-[0.98]">
                         {isCreating ? 'Create Room' : 'Join Room'}
                     </button>
                 </form>
                 <button 
-                    className="toggle-mode brutalist-button" 
+                    className="toggle-mode brutalist-button transition-all duration-200 ease-apple hover:-translate-y-[1px] hover:scale-[1.02] hover:shadow-lg active:scale-[0.98]" 
                     onClick={() => setIsCreating(!isCreating)}
                 >
                     {isCreating ? 'Join Existing Room' : 'Create New Room'}

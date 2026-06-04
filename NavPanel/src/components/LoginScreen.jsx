@@ -37,6 +37,7 @@ export default function LoginScreen() {
 
   const onGoogle = async (e) => {
     e.preventDefault();
+    e.stopPropagation();  
     setErr('');
     setLoading(true);
     try {
@@ -217,6 +218,7 @@ export default function LoginScreen() {
 
                   <div className="grid grid-cols-2 gap-4">
                     <button 
+                    type="button"
                       onClick={onGoogle} 
                       disabled={!firebaseReady || loading} 
                       className="flex items-center justify-center py-3 px-4 bg-white/5 border border-white/10 rounded-lg hover:bg-white/10 transition-colors group disabled:opacity-50 disabled:cursor-not-allowed"

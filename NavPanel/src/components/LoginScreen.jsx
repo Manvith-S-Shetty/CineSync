@@ -218,7 +218,7 @@ export default function LoginScreen() {
 
                   <div className="grid grid-cols-2 gap-4">
                     <button 
-                    type="button"
+                      type="button"
                       onClick={onGoogle} 
                       disabled={!firebaseReady || loading} 
                       className="flex items-center justify-center py-3 px-4 bg-white/5 border border-white/10 rounded-lg hover:bg-white/10 transition-colors group disabled:opacity-50 disabled:cursor-not-allowed"
@@ -227,6 +227,7 @@ export default function LoginScreen() {
                       <span className="font-label-md text-label-md text-white">Google</span>
                     </button>
                     <button 
+                      type="button"
                       onClick={(e) => { e.preventDefault(); setErr("Discord authentication is currently disabled."); }} 
                       className="flex items-center justify-center py-3 px-4 bg-[#5865F2]/20 border border-[#5865F2]/30 rounded-lg hover:bg-[#5865F2]/30 transition-colors group"
                     >

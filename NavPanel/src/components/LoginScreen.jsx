@@ -41,8 +41,15 @@ export default function LoginScreen() {
     setLoading(true);
     try {
       await signInWithGoogle();
-    } catch (e) {
-      setErr(e?.message || 'Sign-in failed');
+    // } catch (e) {
+    //   setErr(e?.message || 'Sign-in failed');
+     } catch (e) {
+      console.error("GOOGLE LOGIN ERROR:", e);
+      console.error("CODE:", e?.code);
+      console.error("MESSAGE:", e?.message);
+
+      setErr(`${e?.code} : ${e?.message}`);
+      
     } finally {
       setLoading(false);
     }

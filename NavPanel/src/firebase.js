@@ -22,6 +22,4 @@ if (hasConfig()) {
 export const auth = app ? getAuth(app) : null;
 export const googleProvider = app ? new GoogleAuthProvider() : null;
 export const firebaseReady = !!app;
-console.log("Firebase Ready:", firebaseReady);
-console.log("Auth Domain:", import.meta.env.VITE_FIREBASE_AUTH_DOMAIN);
-console.log("Project ID:", import.meta.env.VITE_FIREBASE_PROJECT_ID);
+

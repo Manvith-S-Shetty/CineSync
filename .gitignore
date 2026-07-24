@@ -1,6 +1,9 @@
 node_modules/
 .env
-video-chat-frontend/.env
+NavPanel/.env
+VisionBridge/.env
+VisionBridge/serviceAccountKey.json
+**/serviceAccountKey.json
 dist/
 build/
 .vscode/

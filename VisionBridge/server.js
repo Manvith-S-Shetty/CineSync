@@ -1,7 +1,16 @@
+require('dotenv').config({ quiet: true });
+
 const express = require('express');
 const http = require('http');
 const socketIO = require('socket.io');
 const cors = require('cors');
+const {
+    initFirebaseAdmin,
+    isFirebaseAdminReady,
+    verifyIdToken,
+} = require('./firebaseAdmin');
+
+initFirebaseAdmin();
 
 const app = express();
 const server = http.createServer(app);
@@ -50,7 +59,11 @@ app.use(
 );
 
 app.get('/health', (_req, res) => {
-    res.status(200).json({ ok: true, service: 'signaling-server' });
+    res.status(200).json({
+        ok: true,
+        service: 'signaling-server',
+        authConfigured: isFirebaseAdminReady(),
+    });
 });
 
 app.get('/', (_req, res) => {
@@ -58,19 +71,79 @@ app.get('/', (_req, res) => {
         ok: true,
         service: 'signaling-server',
         health: '/health',
+        authConfigured: isFirebaseAdminReady(),
     });
 });
 
 const io = socketIO(server, {
     cors: {
-        origin: [
-            "http://localhost:5173",
-            "https://cine-sync-beta.vercel.app"
-          ],
+        origin: corsOriginOption,
         methods: ['GET', 'POST'],
         credentials: true,
     },
 });
+
+/** Optional handshake auth — does not replace per-event ID token verification. */
+io.use(async (socket, next) => {
+    const token = socket.handshake?.auth?.token;
+    if (!token) {
+        next();
+        return;
+    }
+    try {
+        socket.data.auth = await verifyIdToken(token);
+    } catch {
+        // Allow connection; privileged handlers still require a valid idToken.
+    }
+    next();
+});
+
+/**
+ * Verify Firebase ID token from client payload.
+ * Returns server-trusted identity or null (and emits a safe error to the socket).
+ */
+async function requireVerifiedIdentity(socket, idToken) {
+    try {
+        const identity = await verifyIdToken(idToken);
+        socket.data.auth = identity;
+        return identity;
+    } catch (err) {
+        const code = err?.code;
+        if (code === 'AUTH_UNAVAILABLE') {
+            socket.emit('error', { message: 'Authentication unavailable' });
+            socket.emit('errorMessage', { message: 'Authentication unavailable' });
+        } else if (code === 'AUTH_REQUIRED' || code === 'auth/id-token-expired') {
+            socket.emit('error', { message: 'Authentication required' });
+            socket.emit('errorMessage', { message: 'Authentication required' });
+        } else {
+            socket.emit('error', { message: 'Authentication failed' });
+            socket.emit('errorMessage', { message: 'Authentication failed' });
+        }
+        return null;
+    }
+}
+
+/** Ensure the socket already joined this room as the verified Firebase user. */
+function requireRoomMember(socket, roomId, identity) {
+    const user = users.get(socket.id);
+    if (
+        !user ||
+        !identity ||
+        user.roomId !== roomId ||
+        user.firebaseUid !== identity.uid ||
+        !rooms.has(roomId) ||
+        !rooms.get(roomId)?.has(socket.id)
+    ) {
+        return null;
+    }
+    return user;
+}
+
+function requireRoomHost(socket, roomId, identity) {
+    const user = requireRoomMember(socket, roomId, identity);
+    if (!user?.isHost) return null;
+    return user;
+}
 
 const rooms = new Map(); // Track rooms and their participants
 const users = new Map(); // Track user details
@@ -123,66 +196,73 @@ io.on('connection', (socket) => {
     console.log('New user connected:', socket.id);
     console.log('[SOCKET CONNECTED]', socket.id);
 
-    // Create or join a room
-    socket.on('createRoom', ({ username, photoURL, displayName, firebaseUid }) => {
-        if (!socket.id || !firebaseUid) {
-            socket.emit('error', { message: 'Sign in required to create a room' });
-            return;
-        }
+    // Optional handshake / refresh: bind verified identity to the socket session
+    socket.on('authenticate', async ({ idToken } = {}) => {
+        const identity = await requireVerifiedIdentity(socket, idToken);
+        if (!identity) return;
+        socket.emit('authenticated', { uid: identity.uid });
+    });
+
+    // Create room — identity from verified ID token only
+    socket.on('createRoom', async ({ idToken } = {}) => {
+        const identity = await requireVerifiedIdentity(socket, idToken);
+        if (!identity || !socket.id) return;
 
         const roomId = generateRoomId();
-        roomHostFirebaseUid.set(roomId, firebaseUid);
-        const name = (displayName || username || 'Guest').trim() || 'Guest';
+        roomHostFirebaseUid.set(roomId, identity.uid);
         joinRoom(socket, {
             roomId,
-            username: name,
-            displayName: name,
-            photoURL: photoURL || '',
-            firebaseUid,
+            username: identity.displayName,
+            displayName: identity.displayName,
+            photoURL: identity.photoURL,
+            firebaseUid: identity.uid,
             isHost: true,
         });
         socket.emit('roomCreated', {
             roomId,
             user: {
                 id: socket.id,
-                username: name,
-                displayName: name,
-                photoURL: photoURL || '',
+                username: identity.displayName,
+                displayName: identity.displayName,
+                photoURL: identity.photoURL,
                 isHost: true,
             },
         });
     });
 
-    // Join existing room
-    socket.on('joinRoom', ({ roomId, username, photoURL, displayName, firebaseUid }) => {
-        const name = (displayName || username || 'Guest').trim() || 'Guest';
-        console.log(`Join room attempt - Room: ${roomId}, User: ${name}, SocketId: ${socket.id}`);
-
-        if (!socket.id || !roomId || !firebaseUid) {
-            console.error('Missing required data:', { socketId: socket.id, roomId, firebaseUid });
-            socket.emit('errorMessage', { message: 'Sign in required to join a room' });
-            socket.emit('error', { message: 'Sign in required to join a room' });
+    // Join existing room — identity from verified ID token only
+    socket.on('joinRoom', async ({ roomId, idToken } = {}) => {
+        const identity = await requireVerifiedIdentity(socket, idToken);
+        if (!identity || !socket.id || !roomId) {
+            if (!roomId) {
+                socket.emit('errorMessage', { message: 'Sign in required to join a room' });
+                socket.emit('error', { message: 'Sign in required to join a room' });
+            }
             return;
         }
 
+        console.log(`Join room attempt - Room: ${roomId}, uid: ${identity.uid}, SocketId: ${socket.id}`);
+
         if (!rooms.has(roomId)) {
             console.error(`Room not found: ${roomId}`);
-            socket.emit('errorMessage', 'Room does not exist');
+            socket.emit('errorMessage', { message: 'Room not found' });
             socket.emit('error', { message: 'Room not found' });
             return;
         }
 
         try {
-            const isHost = roomHostFirebaseUid.get(roomId) === firebaseUid;
+            const isHost = roomHostFirebaseUid.get(roomId) === identity.uid;
             joinRoom(socket, {
                 roomId,
-                username: name,
-                displayName: name,
-                photoURL: photoURL || '',
-                firebaseUid,
+                username: identity.displayName,
+                displayName: identity.displayName,
+                photoURL: identity.photoURL,
+                firebaseUid: identity.uid,
                 isHost,
             });
-            console.log(`User ${name} (${socket.id}) joined room ${roomId} successfully (host=${isHost})`);
+            console.log(
+                `User ${identity.displayName} (${socket.id}) joined room ${roomId} successfully (host=${isHost})`
+            );
         } catch (error) {
             console.error('Error joining room:', error);
             socket.emit('errorMessage', { message: 'Failed to join room' });
@@ -237,7 +317,8 @@ io.on('connection', (socket) => {
             return;
         }
 
-        if (rooms.get(roomId)?.has(to)) {
+        const room = rooms.get(roomId);
+        if (room?.has(socket.id) && room.has(to)) {
             socket.to(to).emit('candidate', {
                 from: socket.id,
                 candidate
@@ -303,11 +384,11 @@ io.on('connection', (socket) => {
     });
 
     /** Host shares a direct video URL so guests (and late joiners) stay on the same file */
-    socket.on('watchVideoUrl', ({ roomId, videoUrl }) => {
-        const user = users.get(socket.id);
-        if (!user?.isHost || user.roomId !== roomId || !rooms.has(roomId)) {
-            return;
-        }
+    socket.on('watchVideoUrl', async ({ roomId, videoUrl, idToken } = {}) => {
+        const identity = await requireVerifiedIdentity(socket, idToken);
+        if (!identity) return;
+        const user = requireRoomHost(socket, roomId, identity);
+        if (!user) return;
 
         if (videoUrl == null || videoUrl === '') {
             roomWatchVideoUrl.delete(roomId);
@@ -331,9 +412,11 @@ io.on('connection', (socket) => {
     });
 
     /** Backward-compatible event name used by some clients */
-    socket.on('videoChange', ({ roomId, videoUrl }) => {
-        const user = users.get(socket.id);
-        if (!user?.isHost || user.roomId !== roomId || !rooms.has(roomId)) return;
+    socket.on('videoChange', async ({ roomId, videoUrl, idToken } = {}) => {
+        const identity = await requireVerifiedIdentity(socket, idToken);
+        if (!identity) return;
+        const user = requireRoomHost(socket, roomId, identity);
+        if (!user) return;
 
         if (videoUrl == null || videoUrl === '') {
             roomVideo.delete(roomId);
@@ -376,6 +459,9 @@ io.on('connection', (socket) => {
     socket.on('chatMessage', ({ roomId, message }) => {
         const user = users.get(socket.id);
         if (user && rooms.has(roomId)) {
+            const text = typeof message === 'string' ? message.trim() : '';
+            if (!text || text.length > 2000) return;
+
             const messageData = {
                 id: `${Date.now()}-${socket.id.slice(0, 8)}`,
                 userId: socket.id,
@@ -383,20 +469,34 @@ io.on('connection', (socket) => {
                 username: user.username,
                 displayName: user.displayName || user.username,
                 photoURL: user.photoURL || '',
-                text: message,
+                text,
                 timestamp: new Date().toISOString(),
                 isHost: user.isHost
             };
             
-            // Store message in room messages
+            // Store message in room messages (bounded history)
             if (!roomMessages.has(roomId)) {
                 roomMessages.set(roomId, []);
             }
-            roomMessages.get(roomId).push(messageData);
+            const history = roomMessages.get(roomId);
+            history.push(messageData);
+            const MAX_CHAT_HISTORY = 200;
+            if (history.length > MAX_CHAT_HISTORY) {
+                history.splice(0, history.length - MAX_CHAT_HISTORY);
+            }
             
             // Broadcast to everyone in the room
             io.to(roomId).emit('chatMessage', messageData);
         }
+    });
+
+    socket.on('videoStateChange', ({ roomId, isVideoOff }) => {
+        const user = users.get(socket.id);
+        if (!user || user.roomId !== roomId || !rooms.has(roomId)) return;
+        socket.to(roomId).emit('videoStateChanged', {
+            userId: socket.id,
+            isVideoOff: !!isVideoOff,
+        });
     });
 
     // Handle disconnection
@@ -409,19 +509,23 @@ io.on('connection', (socket) => {
         handleDisconnect(socket);
     });
 
-    socket.on('endCall', ({ roomId }) => {
-        const user = users.get(socket.id);
-        if (user && user.isHost) {
-            io.to(roomId).emit('callEnded');
-            // Clean up the room
-            if (rooms.has(roomId)) {
-                rooms.delete(roomId);
-                roomHostFirebaseUid.delete(roomId);
-                roomWatchVideoUrl.delete(roomId);
-                roomVideo.delete(roomId);
-                if (roomMessages.has(roomId)) {
-                    roomMessages.delete(roomId);
-                }
+    socket.on('endCall', async ({ roomId, idToken } = {}) => {
+        const identity = await requireVerifiedIdentity(socket, idToken);
+        if (!identity) return;
+        const user = requireRoomHost(socket, roomId, identity);
+        if (!user) {
+            socket.emit('error', { message: 'Not authorized' });
+            return;
+        }
+
+        io.to(roomId).emit('callEnded');
+        if (rooms.has(roomId)) {
+            rooms.delete(roomId);
+            roomHostFirebaseUid.delete(roomId);
+            roomWatchVideoUrl.delete(roomId);
+            roomVideo.delete(roomId);
+            if (roomMessages.has(roomId)) {
+                roomMessages.delete(roomId);
             }
         }
     });
@@ -437,7 +541,16 @@ io.on('connection', (socket) => {
 
 // Helper functions
 function generateRoomId() {
-    return Math.random().toString(36).substring(2, 8).toUpperCase();
+    let id;
+    let attempts = 0;
+    do {
+        id = Math.random().toString(36).substring(2, 8).toUpperCase();
+        attempts += 1;
+    } while (rooms.has(id) && attempts < 50);
+    if (rooms.has(id)) {
+        id = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`.toUpperCase().slice(0, 10);
+    }
+    return id;
 }
 
 function joinRoom(socket, { roomId, username, isHost, photoURL, displayName, firebaseUid }) {
@@ -549,6 +662,7 @@ server.listen(PORT, HOST, () => {
     console.log(
         `[signaling] listening on http://${HOST === '0.0.0.0' ? '0.0.0.0 (all interfaces)' : HOST}:${PORT}`
     );
+    console.log(`[signaling] Firebase Admin auth: ${isFirebaseAdminReady() ? 'ready' : 'NOT CONFIGURED'}`);
     if (getCorsAllowedOrigins()) {
         console.log('[signaling] CORS_ORIGIN:', getCorsAllowedOrigins().join(', '));
     }

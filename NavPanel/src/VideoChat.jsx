@@ -178,10 +178,13 @@ function messageFromMediaError(err) {
 }
 
 const VideoChat = () => {
-  const { profile } = useAuth();
+  const { profile, getIdToken } = useAuth();
   const profileRef = useRef(null);
+  const getIdTokenRef = useRef(getIdToken);
   const wasJoinedRef = useRef(false);
-  const rejoinPayloadRef = useRef(null);
+  /** Room id only — fresh ID token is fetched on each rejoin. */
+  const rejoinRoomIdRef = useRef(null);
+  const buildJoinPayloadRef = useRef(null);
   const isJoinedRef = useRef(false); // mirror isJoined for socket connect handler
   const typingStopTimerRef = useRef(null);
   const messageBoxRef = useRef(null);
@@ -189,6 +192,31 @@ const VideoChat = () => {
   useEffect(() => {
     profileRef.current = profile;
   }, [profile]);
+
+  useEffect(() => {
+    getIdTokenRef.current = getIdToken;
+  }, [getIdToken]);
+
+  // Keep socket session identity fresh after sign-in (optional; privileged events still send idToken)
+  useEffect(() => {
+    if (!profile?.uid) return undefined;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const idToken = await getIdTokenRef.current();
+        if (cancelled) return;
+        socket.auth = { token: idToken };
+        if (socket.connected) {
+          socket.emit('authenticate', { idToken });
+        }
+      } catch {
+        /* not signed in yet */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [profile?.uid]);
 
   // My refs for video elements and connections
   const localVideoRef = useRef(null);
@@ -311,10 +339,20 @@ const VideoChat = () => {
     const onConnect = () => {
       console.log("[SOCKET CONNECTED]", socket.id);
       setSocketReconnecting(false);
-      const payload = rejoinPayloadRef.current;
-      if (wasJoinedRef.current && payload && isJoinedRef.current) {
-        socket.emit('joinRoom', payload);
-        setConnectionStatus('connecting');
+      const rid = rejoinRoomIdRef.current;
+      if (wasJoinedRef.current && rid && isJoinedRef.current) {
+        void (async () => {
+          try {
+            const payload = await buildJoinPayloadRef.current?.(rid);
+            if (payload) {
+              socket.emit('joinRoom', payload);
+              setConnectionStatus('connecting');
+            }
+          } catch (err) {
+            console.error('[rejoin] failed to get ID token', err);
+            setError('Authentication required to reconnect. Please refresh.');
+          }
+        })();
       }
     };
 
@@ -650,32 +688,25 @@ const VideoChat = () => {
     }
   }, []);
 
-  const buildJoinPayload = useCallback((rid) => {
-    const p = profileRef.current;
-    if (!p?.uid) return null;
-    return {
-      roomId: rid,
-      username: p.displayName,
-      displayName: p.displayName,
-      photoURL: p.photoURL || '',
-      firebaseUid: p.uid,
-    };
+  const buildJoinPayload = useCallback(async (rid) => {
+    if (!rid) return null;
+    const idToken = await getIdTokenRef.current();
+    return { roomId: rid, idToken };
   }, []);
 
-  // Handle room creation (profile from Firebase auth)
+  useEffect(() => {
+    buildJoinPayloadRef.current = buildJoinPayload;
+  }, [buildJoinPayload]);
+
+  // Handle room creation (identity verified via Firebase ID token on server)
   const createRoom = async () => {
     try {
-      const p = profileRef.current;
-      if (!p?.uid) {
+      if (!profileRef.current?.uid) {
         setError('You must be signed in to create a room.');
         return;
       }
-      socket.emit('createRoom', {
-        username: p.displayName,
-        displayName: p.displayName,
-        photoURL: p.photoURL || '',
-        firebaseUid: p.uid,
-      });
+      const idToken = await getIdTokenRef.current();
+      socket.emit('createRoom', { idToken });
     } catch (error) {
       setError(`Failed to create room: ${error.message}`);
     }
@@ -688,8 +719,7 @@ const VideoChat = () => {
 
   const joinRoom = async (joinRoomId) => {
     try {
-      const p = profileRef.current;
-      if (!p?.uid) {
+      if (!profileRef.current?.uid) {
         setError('You must be signed in to join a room.');
         return;
       }
@@ -698,7 +728,7 @@ const VideoChat = () => {
         setError('Invalid Room ID');
         return;
       }
-      const payload = buildJoinPayload(rid);
+      const payload = await buildJoinPayload(rid);
       console.log("[JOIN ROOM]", rid);
       console.log('Attempting to join room:', { roomId: rid });
       socket.emit('joinRoom', payload);
@@ -774,8 +804,7 @@ const VideoChat = () => {
       setConnectionStatus('connected');
       setIsJoined(true);
       wasJoinedRef.current = true;
-      const payload = buildJoinPayload(roomId);
-      if (payload) rejoinPayloadRef.current = payload;
+      rejoinRoomIdRef.current = roomId;
       clearChat();
       navigator.clipboard.writeText(roomId);
       alert(`Room created! Room ID: ${roomId} (copied to clipboard)`);
@@ -796,8 +825,7 @@ const VideoChat = () => {
       setConnectionStatus('connected');
       setIsJoined(true);
       wasJoinedRef.current = true;
-      const payload = buildJoinPayload(roomId);
-      if (payload) rejoinPayloadRef.current = payload;
+      rejoinRoomIdRef.current = roomId;
       setChatMessages(Array.isArray(chatHistory) ? chatHistory : []);
       setSyncedWatchVideoUrl(
         (videoUrl ?? sharedWatchUrl) === undefined || (videoUrl ?? sharedWatchUrl) === null
@@ -990,7 +1018,7 @@ const VideoChat = () => {
       socket.off('hostChanged');
       socket.off('errorMessage');
     };
-  }, [roomId, initiateCall, createPeerConnection, flushPendingIceCandidates, enqueueIceCandidate, buildJoinPayload]);
+  }, [roomId, initiateCall, createPeerConnection, flushPendingIceCandidates, enqueueIceCandidate]);
 
   // Clean up when I leave or someone else leaves
   const handleUserDisconnected = (userId) => {
@@ -1279,7 +1307,7 @@ const VideoChat = () => {
     console.log('Leaving call...');
     try {
       wasJoinedRef.current = false;
-      rejoinPayloadRef.current = null;
+      rejoinRoomIdRef.current = null;
       setSyncedWatchVideoUrl(null);
       setSocketReconnecting(false);
       setTypingPeers({});
@@ -1332,11 +1360,15 @@ const VideoChat = () => {
     }
   };
 
-  const endCall = () => {
-    if (isHost) {
-      socket.emit('endCall', { roomId });
+  const endCall = async () => {
+    if (!isHost) return;
+    try {
+      const idToken = await getIdTokenRef.current();
+      socket.emit('endCall', { roomId, idToken });
       leaveCall();
       clearChat();
+    } catch (error) {
+      setError(`Failed to end call: ${error.message}`);
     }
   };
 
@@ -1570,10 +1602,13 @@ const VideoChat = () => {
   useEffect(() => {
     const checkSocketConnection = () => {
       if (!socket || !socket.connected) {
-        console.error('Socket disconnected');
-        setError('Connection lost. Please refresh the page.');
-        setConnectionStatus('disconnected');
+        if (wasJoinedRef.current && isJoinedRef.current) {
+          setSocketReconnecting(true);
+          setConnectionStatus('disconnected');
+        }
+        return;
       }
+      setSocketReconnecting(false);
     };
 
     const interval = setInterval(checkSocketConnection, 5000);
@@ -1726,7 +1761,13 @@ const VideoChat = () => {
   if (!isJoined) {
     return (
       <div className="flex min-h-0 w-full flex-1 flex-col overflow-auto video-chat-root video-chat-root--join">
-        {error ? <ErrorCard message={error} /> : null}
+        {error ? (
+          <ErrorCard
+            message={error}
+            retry={() => setError(null)}
+            continueWithoutCamera={() => setError(null)}
+          />
+        ) : null}
         {renderMediaErrorBanner()}
         {mediaWarning ? <div className="status-error">{mediaWarning}</div> : null}
         <div className="media-mode-row media-mode-row--join">{renderMediaModeBadge()}</div>
@@ -1738,7 +1779,13 @@ const VideoChat = () => {
 
   return (
     <div className="flex min-h-0 w-full flex-1 flex-col overflow-hidden video-chat-root">
-      {error ? <ErrorCard message={error} /> : null}
+      {error ? (
+        <ErrorCard
+          message={error}
+          retry={() => setError(null)}
+          continueWithoutCamera={() => setError(null)}
+        />
+      ) : null}
       <ReactionFloatLayer trigger={reactionTrigger} />
       <ConnectionStatus
         status={connectionStatus}

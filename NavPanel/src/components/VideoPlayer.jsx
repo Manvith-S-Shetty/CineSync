@@ -8,6 +8,7 @@ import {
   useState,
 } from 'react';
 import socket from '../socket';
+import { useAuth } from '../contexts/AuthContext';
 import {
   DEFAULT_VIDEO_SAMPLE_URL,
   validateDirectVideoUrl,
@@ -31,6 +32,7 @@ const VideoPlayer = forwardRef(function VideoPlayer(
   },
   ref
 ) {
+  const { getIdToken } = useAuth();
   const videoRef = useRef(null);
   const objectUrlRef = useRef(null);
   const isSyncingRef = useRef(false);
@@ -55,10 +57,18 @@ const VideoPlayer = forwardRef(function VideoPlayer(
   const broadcastWatchUrl = useCallback(
     (videoUrl) => {
       if (!isHost || !roomId || !socket.connected) return;
-      socket.emit('videoChange', { roomId, videoUrl });
-      socket.emit('watchVideoUrl', { roomId, videoUrl });
+      void (async () => {
+        try {
+          const idToken = await getIdToken();
+          socket.emit('videoChange', { roomId, videoUrl, idToken });
+          socket.emit('watchVideoUrl', { roomId, videoUrl, idToken });
+        } catch (err) {
+          console.error('[VideoPlayer] auth required to change video', err);
+          setError?.('Authentication required to change video.');
+        }
+      })();
     },
-    [isHost, roomId]
+    [isHost, roomId, getIdToken, setError]
   );
 
   const runSyncedUpdate = async (updateFn) => {
@@ -162,6 +172,7 @@ const VideoPlayer = forwardRef(function VideoPlayer(
 
   const handleLocalFileChange = useCallback(
     (e) => {
+      if (!isHost) return;
       const file = e.target.files?.[0];
       if (!file || !file.type.startsWith('video/')) {
         return;
@@ -192,6 +203,7 @@ const VideoPlayer = forwardRef(function VideoPlayer(
   );
 
   const handleUseSampleVideo = useCallback(() => {
+    if (!isHost) return;
     revokeBlobUrl();
     setVideoSrc(DEFAULT_VIDEO_SAMPLE_URL);
     setLocalFileLabel('');
@@ -215,14 +227,17 @@ const VideoPlayer = forwardRef(function VideoPlayer(
 
   const loadUrl = useCallback(
     (raw) => {
+      if (!isHost) {
+        return { ok: false, error: 'Only the host can change the video' };
+      }
       if (!socket || !socket.connected) {
-        if (setError) setError("Server not connected");
-        return { ok: false };
+        setInlineUrlError('Server not connected');
+        return { ok: false, error: 'Server not connected' };
       }
       const rawStr = typeof raw === 'string' ? raw : String(raw ?? '');
-      if (!rawStr) {
-        if (setError) setError("No video URL provided");
-        return { ok: false };
+      if (!rawStr.trim()) {
+        setInlineUrlError('Enter a video URL.');
+        return { ok: false, error: 'Enter a video URL.' };
       }
       console.log('[VideoPlayer] loadUrl called', {
         length: rawStr.length,
@@ -247,9 +262,9 @@ const VideoPlayer = forwardRef(function VideoPlayer(
         videoRef.current.pause();
         videoRef.current.currentTime = 0;
       }
-      if (isHost && roomId) {
+      if (roomId) {
         broadcastWatchUrl(v.url);
-        console.log('[VideoPlayer] broadcast watchVideoUrl to room:', roomId);
+        console.log('[VideoPlayer] broadcast videoChange to room:', roomId);
       }
       return { ok: true };
     },

@@ -19,7 +19,7 @@ WebRTC media runs **peer-to-peer** in the browser. The signaling server only exc
 2. In [Render Dashboard](https://dashboard.render.com) → **New +** → **Web Service**.
 3. Connect the repository.
 4. Configure:
-   - **Root Directory**: `signaling-server`
+   - **Root Directory**: `VisionBridge`
    - **Runtime**: Node
    - **Build Command**: `npm install`
    - **Start Command**: `npm start`
@@ -45,7 +45,7 @@ After the first deploy, copy the service URL, e.g. `https://video-chat-signaling
 
 ### 1.4 Blueprint (optional)
 
-From the repo root, `signaling-server/render.yaml` can be used as a Render Blueprint. Set **`CORS_ORIGIN`** in the dashboard after creation.
+From the repo root, `VisionBridge/render.yaml` can be used as a Render Blueprint. Set **`CORS_ORIGIN`** in the dashboard after creation.
 
 ### Render CLI (optional)
 
@@ -65,10 +65,10 @@ render login
 npm i -g vercel
 ```
 
-### 2.2 First deploy from `video-chat-frontend`
+### 2.2 First deploy from `NavPanel`
 
 ```bash
-cd video-chat-frontend
+cd NavPanel
 vercel
 ```
 
@@ -80,12 +80,12 @@ vercel --prod
 
 ### 2.3 Project settings in Vercel dashboard
 
-- **Root Directory**: `video-chat-frontend` (if the Git repo contains the monorepo root).
+- **Root Directory**: `NavPanel` (if the Git repo contains the monorepo root).
 - **Framework Preset**: Vite (auto-detected).
 - **Build Command**: `npm run build` (default).
 - **Output Directory**: `dist` (Vite default).
 
-`vercel.json` in `video-chat-frontend` adds SPA rewrites so React Router paths resolve to `index.html`.
+`vercel.json` in `NavPanel` adds SPA rewrites so React Router paths resolve to `index.html`.
 
 ### 2.4 Environment variables on Vercel
 
@@ -105,7 +105,7 @@ In **Project → Settings → Environment Variables**, add (Production + Preview
 Redeploy after changing env vars:
 
 ```bash
-cd video-chat-frontend
+cd NavPanel
 vercel --prod
 ```
 
@@ -120,6 +120,11 @@ Or trigger a redeploy from the Vercel dashboard.
 3. **Authentication → Settings → Authorized domains**: add  
    - `your-project.vercel.app`  
    - Your custom domain if you use one.
+4. **Backend Admin SDK (required):** Firebase Console → Project settings → Service accounts → Generate new private key.  
+   On Render (VisionBridge), set one of:
+   - `FIREBASE_SERVICE_ACCOUNT_JSON` = full JSON of the service account (recommended), or
+   - `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, `FIREBASE_PRIVATE_KEY` (use `\n` for newlines in the private key).  
+   Confirm `GET /health` returns `"authConfigured": true`.
 
 ---
 
@@ -132,8 +137,8 @@ Or trigger a redeploy from the Vercel dashboard.
 
 ## 5. Local `.env` (do not commit secrets)
 
-- Copy `video-chat-frontend/.env.example` → `video-chat-frontend/.env`.
-- Copy `signaling-server/.env.example` → `signaling-server/.env` for local overrides.
+- Copy `NavPanel/.env.example` → `NavPanel/.env`.
+- Copy `VisionBridge/.env.example` → `VisionBridge/.env` for local overrides.
 
 ---
 
@@ -151,18 +156,18 @@ Or trigger a redeploy from the Vercel dashboard.
 
 ```bash
 # Frontend — local production build test
-cd video-chat-frontend
+cd NavPanel
 cp .env.example .env   # then edit
 npm run build
 npm run preview
 
 # Signaling — local
-cd signaling-server
+cd VisionBridge
 cp .env.example .env   # optional
 npm install
 npm start
 
-# Vercel production deploy (from video-chat-frontend)
+# Vercel production deploy (from NavPanel)
 vercel --prod
 ```
 

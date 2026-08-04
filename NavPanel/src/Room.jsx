@@ -5,6 +5,14 @@ import VideoStage from './components/VideoStage';
 import BottomPanels from './components/BottomPanels';
 import './styles/RoomLayout.css';
 
+const isDev = import.meta.env.DEV;
+const devLog = (...args) => {
+  if (isDev) console.log(...args);
+};
+const devWarn = (...args) => {
+  if (isDev) console.warn(...args);
+};
+
 export default function Room({
   roomId,
   mediaWarning,
@@ -32,10 +40,10 @@ export default function Room({
         onFileChange={(e) => vpRef.current?.loadLocalFile(e)}
         onLoadUrl={() => {
           const url = String(pasteUrl ?? '').trim();
-          console.log('[Room] Load URL', { length: url.length, preview: url.slice(0, 100) });
+          devLog('[Room] Load URL', { length: url.length, preview: url.slice(0, 100) });
           const vp = vpRef.current;
           if (!vp) {
-            console.warn('[Room] VideoPlayer ref not ready');
+            devWarn('[Room] VideoPlayer ref not ready');
             return;
           }
           const result = vp.loadUrl(url);

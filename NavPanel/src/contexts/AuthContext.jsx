@@ -41,6 +41,17 @@ export function AuthProvider({ children }) {
     if (auth) await signOut(auth);
   }, []);
 
+  /**
+   * Firebase ID token for VisionBridge verification.
+   * Never send uid/email/displayName as proof of identity — only this token.
+   */
+  const getIdToken = useCallback(async (forceRefresh = false) => {
+    if (!auth?.currentUser) {
+      throw new Error('You must be signed in.');
+    }
+    return auth.currentUser.getIdToken(forceRefresh);
+  }, []);
+
   /** Global profile for header, participants, and chat (Firebase user). */
   const profile = useMemo(() => {
     if (!user) return null;
@@ -60,8 +71,9 @@ export function AuthProvider({ children }) {
       firebaseReady,
       signInWithGoogle,
       logout,
+      getIdToken,
     }),
-    [user, profile, loading, firebaseReady, signInWithGoogle, logout]
+    [user, profile, loading, firebaseReady, signInWithGoogle, logout, getIdToken]
   );
 
   return (

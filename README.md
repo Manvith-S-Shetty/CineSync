@@ -1,150 +1,112 @@
-# Real-Time Video Chat Application
+# 🎬 CineSync – Watch Party Platform
 
-A real-time video chat application built with React, WebRTC, and Socket.IO that enables users to have video conversations in private rooms.
+A real-time watch party web application that allows users to watch videos together, video call, and share screens seamlessly.
 
-## Features
+---
 
-- 🎥 **Real-time video and audio streaming**
-- 💬 **Text chat functionality**
-- 🔐 **Private room creation**
-- 👥 **Multiple participant support**
-- 📱 **Responsive design**
-- 🎛️ **Camera/Microphone controls**
-- 🔗 **Shareable room links**
-- ⚡ **Low-latency communication**
+## 🚀 Features
 
-## Technologies Used
+* 🎬 Synchronized video playback
+* 📹 Real-time video calling (WebRTC)
+* 📺 Screen sharing support
+* 📌 Pin / maximize video layout
+* 💬 Live chat
+* ❤️ Emoji reactions
+* 🔐 Google Authentication (Firebase)
+* 🌐 Multi-device support
 
-### Frontend:
-- **React.js**
-- **WebRTC**
-- **Socket.IO-client**
-- **Material UI Icons**
-- **CSS3**
+---
 
-### Backend:
-- **Node.js**
-- **Express.js**
-- **Socket.IO**
-- **WebRTC Signaling**
+## 🛠️ Tech Stack
 
-## Getting Started
+* **Frontend:** React + Tailwind CSS
+* **Backend:** Node.js + Socket.IO
+* **Real-time:** WebRTC
+* **Authentication:** Firebase
 
-### Prerequisites
+---
 
-Ensure the following are installed:
+## ⚙️ Setup Instructions
 
-- **Node.js**: Version 14 or higher
-- **npm** or **yarn**
-- **Git**
+### 1️⃣ Clone the repository
 
-### Installation
+```bash
+git clone https://github.com/your-username/cinesync-watch-party.git
+cd cinesync-watch-party
+```
 
-1. Clone the repository:
-   ```bash
+---
 
-=======
-   git clone https://github.com/Manvith-S-Shetty/CineSync.git
->>>>>>> 7b29a8f (Updated frontend)
-   cd Video-Chat
-   ```
+### 2️⃣ Install dependencies
 
-2. Install frontend dependencies:
-   ```bash
-   cd NavPanel
-   npm install
-   ```
+#### Frontend
 
-3. Install backend dependencies:
-   ```bash
-   cd ../VisionBridge
-   npm install
-   ```
+```bash
+cd NavPanel
+npm install
+```
 
-4. Start the backend server:
-   ```bash
-   npm start
-   ```
+#### Backend
 
-5. Start the frontend application:
-   ```bash
-   cd ../Navpanel
-   npm start
-   ```
+```bash
+cd ../VisionBridge
+npm install
+```
 
-6. Open your browser and navigate to:
-   ```
-   http://localhost:3000
-   ```
+---
 
-## Usage
+### 3️⃣ Setup environment variables
 
-1. Open the application in your browser.
-2. Allow camera and microphone permissions when prompted.
-3. Create a new room or join an existing one using a room ID.
-4. Share the room ID with others to join the video chat.
+Create `.env` inside `NavPanel`:
 
-### Use the control buttons to:
-- Toggle camera
-- Toggle microphone
-- Leave the room
-- Send chat messages
+```env
+VITE_BACKEND_URL=http://localhost:5000
+VITE_FIREBASE_API_KEY=your_key
+VITE_FIREBASE_AUTH_DOMAIN=your_domain
+VITE_FIREBASE_PROJECT_ID=your_project_id
+VITE_FIREBASE_STORAGE_BUCKET=your_bucket
+VITE_FIREBASE_MESSAGING_SENDER_ID=your_sender_id
+VITE_FIREBASE_APP_ID=your_app_id
+```
 
-## Features in Detail
+---
 
-### Video Chat
-- Real-time video and audio streaming using WebRTC
-- Support for multiple participants
-- Camera on/off toggle
-- Microphone mute/unmute toggle
+### 4️⃣ Run the app
 
-### Room Management
-- Create private rooms
-- Join existing rooms via room ID
-- Automatic room cleanup when empty
+#### Backend
 
-### Chat Features
-- Real-time text chat alongside video
-- Participant presence indicators
-- Chat history within session
+```bash
+cd VisionBridge
+npm start
+```
 
-### Error Handling
-- Graceful handling of device permission denials
-- Connection status indicators
-- Automatic reconnection attempts
-- Clear error messages for users
+#### Frontend
 
-## Contributing
+```bash
+cd NavPanel
+npm run dev
+```
 
-Contributions are welcome! To contribute:
+---
 
-1. Fork the project.
-2. Create your feature branch:
-   ```bash
-   git checkout -b feature/AmazingFeature
-   ```
-3. Commit your changes:
-   ```bash
-   git commit -m 'Add some AmazingFeature'
-   ```
-4. Push to the branch:
-   ```bash
-   git push origin feature/AmazingFeature
-   ```
-5. Open a Pull Request.
+## 🌐 Deployment
 
-## License
+* Frontend → Vercel
+* Backend → Render
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+---
 
-## Contact
+## ⚠️ Notes
 
-- **Manvith S Shetty** - [@Manvith-S-Shetty](https://github.com/Manvith-S-Shetty)
-- **Project Link**: [Video Chat WebRTC](https://github.com/Manvith-S-Shetty/CineSync)
+* YouTube URLs are not supported in the video player (use direct video URLs like `.mp4`)
+* Both users should load the same local file for perfect sync
 
-## Acknowledgments
+---
 
-- WebRTC Community
-- Socket.IO Team
-- React Community
-- All contributors and testers
+## 📸 Demo
+
+---
+
+## 📄 License
+
+This project is for educational purposes.

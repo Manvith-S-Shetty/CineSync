@@ -1,4 +1,4 @@
-import React, { useRef, useState, useEffect, useLayoutEffect, useCallback, useMemo } from "react";
+import { useRef, useState, useEffect, useLayoutEffect, useCallback, useMemo } from "react";
 import socket from "./socket";
 import { getRtcConfiguration } from './config/rtcConfig';
 import RoomJoin from './components/RoomJoin';
@@ -12,6 +12,16 @@ import { LOCAL_TILE_ID, streamHasScreenShareVideo } from './videoCallLayoutUtils
 import { useAuth } from './contexts/AuthContext';
 import './styles/VideoChat.css';
 
+const isDev = import.meta.env.DEV;
+const devLog = (...args) => {
+  if (isDev) console.log(...args);
+};
+const devWarn = (...args) => {
+  if (isDev) console.warn(...args);
+};
+const devError = (...args) => {
+  if (isDev) console.error(...args);
+};
 const WATCH_REACTIONS = ['❤️', '😂', '🔥', '😮'];
 
 function formatChatTimestamp(iso) {
@@ -42,11 +52,11 @@ async function pickFirstVideoinputDeviceId() {
   try {
     const devices = await navigator.mediaDevices.enumerateDevices();
     const inputs = devices.filter((d) => d.kind === 'videoinput');
-    console.log('[media] videoinput count:', inputs.length);
+    devLog('[media] videoinput count:', inputs.length);
     const withId = inputs.find((d) => d.deviceId && d.deviceId.length > 0);
     return withId?.deviceId ?? null;
   } catch (err) {
-    console.error(err.name, err.message);
+    devError(err.name, err.message);
     return null;
   }
 }
@@ -55,11 +65,11 @@ async function pickFirstAudioinputDeviceId() {
   try {
     const devices = await navigator.mediaDevices.enumerateDevices();
     const mics = devices.filter((d) => d.kind === 'audioinput');
-    console.log('[media] audioinput count:', mics.length);
+    devLog('[media] audioinput count:', mics.length);
     const withId = mics.find((d) => d.deviceId && d.deviceId.length > 0);
     return withId?.deviceId ?? null;
   } catch (err) {
-    console.error(err.name, err.message);
+    devError(err.name, err.message);
     return null;
   }
 }
@@ -69,7 +79,7 @@ async function logMicrophonePermissionState() {
   try {
     if (!navigator.permissions?.query) return;
     const permission = await navigator.permissions.query({ name: 'microphone' });
-    console.log('Mic permission:', permission.state);
+    devLog('Mic permission:', permission.state);
   } catch {
     /* Safari / Firefox may reject unknown descriptor */
   }
@@ -112,7 +122,7 @@ async function getUserMediaSafeWithFallback(videoDeviceId, options = {}) {
   if (includeAudio && audioDeviceId === undefined) {
     audioDeviceId = await pickFirstAudioinputDeviceId();
     if (audioDeviceId) {
-      console.log('[media] using explicit audioinput deviceId');
+      devLog('[media] using explicit audioinput deviceId');
     }
   }
 
@@ -127,7 +137,7 @@ async function getUserMediaSafeWithFallback(videoDeviceId, options = {}) {
       const audio = buildAudioConstraints(audioDeviceId || null);
       return await navigator.mediaDevices.getUserMedia({ video, audio });
     } catch (err) {
-      console.error('Full media failed:', err?.name, err?.message);
+      devError('Full media failed:', err?.name, err?.message);
       if (audioDeviceId) {
         try {
           return await navigator.mediaDevices.getUserMedia({
@@ -135,7 +145,7 @@ async function getUserMediaSafeWithFallback(videoDeviceId, options = {}) {
             audio: buildAudioConstraints(null),
           });
         } catch (err2) {
-          console.error('Audio without deviceId failed:', err2?.name, err2?.message);
+          devError('Audio without deviceId failed:', err2?.name, err2?.message);
         }
       }
       return navigator.mediaDevices.getUserMedia({ video, audio: false });
@@ -145,14 +155,14 @@ async function getUserMediaSafeWithFallback(videoDeviceId, options = {}) {
   try {
     return await tryVideoWithAudio(videoExact);
   } catch (err) {
-    console.error(err.name, err.message);
+    devError(err.name, err.message);
     if (!videoDeviceId) {
       throw err;
     }
     try {
       return await tryVideoWithAudio(videoRelaxed);
     } catch (err4) {
-      console.error(err4.name, err4.message);
+      devError(err4.name, err4.message);
       throw err4;
     }
   }
@@ -178,10 +188,13 @@ function messageFromMediaError(err) {
 }
 
 const VideoChat = () => {
-  const { profile } = useAuth();
+  const { profile, getIdToken } = useAuth();
   const profileRef = useRef(null);
+  const getIdTokenRef = useRef(getIdToken);
   const wasJoinedRef = useRef(false);
-  const rejoinPayloadRef = useRef(null);
+  /** Room id only — fresh ID token is fetched on each rejoin. */
+  const rejoinRoomIdRef = useRef(null);
+  const buildJoinPayloadRef = useRef(null);
   const isJoinedRef = useRef(false); // mirror isJoined for socket connect handler
   const typingStopTimerRef = useRef(null);
   const messageBoxRef = useRef(null);
@@ -190,19 +203,53 @@ const VideoChat = () => {
     profileRef.current = profile;
   }, [profile]);
 
+  useEffect(() => {
+    getIdTokenRef.current = getIdToken;
+  }, [getIdToken]);
+
+  // Keep socket session identity fresh after sign-in (optional; privileged events still send idToken)
+  useEffect(() => {
+    if (!profile?.uid) return undefined;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const idToken = await getIdTokenRef.current();
+        if (cancelled) return;
+        socket.auth = { token: idToken };
+        if (socket.connected) {
+          socket.emit('authenticate', { idToken });
+        }
+      } catch {
+        /* not signed in yet */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [profile?.uid]);
+
   // My refs for video elements and connections
   const localVideoRef = useRef(null);
   const peerConnectionsRef = useRef({});
   const localStreamRef = useRef(null);
+  const screenShareStreamRef = useRef(null);
   const mediaAcquireInProgressRef = useRef(false);
   /** ICE can arrive before setRemoteDescription; queue by remote socket id */
   const pendingIceCandidatesRef = useRef({});
+  /** Per-peer WebRTC Perfect Negotiation state */
+  const negotiationStateRef = useRef({});
   /** Reconnection calls latest initiateCall (defined later in the component) */
   const initiateCallRef = useRef(async () => {});
+  const handleConnectionFailureRef = useRef(() => {});
+  const handleTrackEndedRef = useRef(() => {});
+  const handleUserDisconnectedRef = useRef(() => {});
+  const leaveCallRef = useRef(() => {});
+  const handleSpeakingStateChangeRef = useRef(() => {});
 
   // States to manage my video chat
   const [remoteStreams, setRemoteStreams] = useState([]);
-  const [isCallStarted, setIsCallStarted] = useState(false);
+  const remoteStreamsRef = useRef([]);
+  const [, setIsCallStarted] = useState(false);
   const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [isAudioMuted, setIsAudioMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(false);
@@ -210,6 +257,7 @@ const VideoChat = () => {
   // Need these for room management
   const [roomId, setRoomId] = useState(null);
   const [isHost, setIsHost] = useState(false);
+  const isHostRef = useRef(false);
   const [participants, setParticipants] = useState([]);
   const [isJoined, setIsJoined] = useState(false);
   const [socketReconnecting, setSocketReconnecting] = useState(false);
@@ -225,6 +273,14 @@ const VideoChat = () => {
   const [mediaReleasedHiddenTab, setMediaReleasedHiddenTab] = useState(false);
   /** 'initializing' | 'video+audio' | 'video-only' | 'no-media' — camera only after explicit "Enable Camera" click */
   const [mediaMode, setMediaMode] = useState('no-media');
+
+  useEffect(() => {
+    isHostRef.current = isHost;
+  }, [isHost]);
+
+  useEffect(() => {
+    remoteStreamsRef.current = remoteStreams;
+  }, [remoteStreams]);
 
   // Chat States
   const [chatMessages, setChatMessages] = useState([]);
@@ -248,7 +304,7 @@ const VideoChat = () => {
       setSyncedWatchVideoUrl(videoUrl === undefined ? null : videoUrl);
     };
     const onVideoChange = ({ videoUrl }) => {
-      console.log("[VIDEO CHANGE]", videoUrl);
+      devLog("[VIDEO CHANGE]", videoUrl);
       setSyncedWatchVideoUrl(videoUrl === undefined ? null : videoUrl);
     };
     socket.on('watchVideoUrl', onWatchVideoUrl);
@@ -297,24 +353,35 @@ const VideoChat = () => {
       });
       peerConnectionsRef.current = {};
       pendingIceCandidatesRef.current = {};
+      negotiationStateRef.current = {};
       setRemoteStreams([]);
       setRemoteVideoStates({});
     };
 
     const onDisconnect = () => {
-      console.log("[SOCKET DISCONNECTED]");
+      devLog("[SOCKET DISCONNECTED]");
       setError("Connection lost. Please refresh.");
       if (wasJoinedRef.current) setSocketReconnecting(true);
       teardownPeers();
     };
 
     const onConnect = () => {
-      console.log("[SOCKET CONNECTED]", socket.id);
+      devLog("[SOCKET CONNECTED]", socket.id);
       setSocketReconnecting(false);
-      const payload = rejoinPayloadRef.current;
-      if (wasJoinedRef.current && payload && isJoinedRef.current) {
-        socket.emit('joinRoom', payload);
-        setConnectionStatus('connecting');
+      const rid = rejoinRoomIdRef.current;
+      if (wasJoinedRef.current && rid && isJoinedRef.current) {
+        void (async () => {
+          try {
+            const payload = await buildJoinPayloadRef.current?.(rid);
+            if (payload) {
+              socket.emit('joinRoom', payload);
+              setConnectionStatus('connecting');
+            }
+          } catch (err) {
+            devError('[rejoin] failed to get ID token', err);
+            setError('Authentication required to reconnect. Please refresh.');
+          }
+        })();
       }
     };
 
@@ -383,6 +450,101 @@ const VideoChat = () => {
     }
   }, [remoteStreams, maximizedTileId]);
 
+  const getNegotiationState = useCallback((userId) => {
+    if (!negotiationStateRef.current[userId]) {
+      negotiationStateRef.current[userId] = {
+        makingOffer: false,
+        ignoreOffer: false,
+        isSettingRemoteAnswerPending: false,
+      };
+    }
+    return negotiationStateRef.current[userId];
+  }, []);
+
+  const isPolitePeer = useCallback((userId) => {
+    if (!socket.id || !userId) return true;
+    return socket.id.localeCompare(userId) > 0;
+  }, []);
+
+  const addLocalTracksToPeer = useCallback(async (peerConnection) => {
+    const stream = localStreamRef.current;
+    if (!stream || !peerConnection || peerConnection.signalingState === 'closed') return false;
+
+    let changed = false;
+    for (const track of stream.getTracks().filter((t) => t.readyState === 'live')) {
+      const existingSender = peerConnection.getSenders().find((sender) => sender.track?.kind === track.kind);
+      if (existingSender) continue;
+
+      const reusableTransceiver = peerConnection
+        .getTransceivers()
+        .find(
+          (transceiver) =>
+            transceiver.receiver?.track?.kind === track.kind &&
+            !transceiver.sender?.track &&
+            transceiver.currentDirection !== 'stopped' &&
+            transceiver.direction !== 'stopped'
+        );
+
+      if (reusableTransceiver) {
+        reusableTransceiver.direction = 'sendrecv';
+        await reusableTransceiver.sender.replaceTrack(track);
+      } else {
+        peerConnection.addTrack(track, stream);
+      }
+      changed = true;
+    }
+    return changed;
+  }, []);
+  const ensureReceiveTransceivers = useCallback((peerConnection) => {
+    if (!peerConnection || peerConnection.signalingState === 'closed' || !peerConnection.addTransceiver) return;
+    const existingKinds = new Set(
+      peerConnection
+        .getTransceivers()
+        .map((transceiver) => transceiver.receiver?.track?.kind)
+        .filter(Boolean)
+    );
+    if (!existingKinds.has('audio')) {
+      peerConnection.addTransceiver('audio', { direction: 'recvonly' });
+    }
+    if (!existingKinds.has('video')) {
+      peerConnection.addTransceiver('video', { direction: 'recvonly' });
+    }
+  }, []);
+  const toSessionDescriptionPayload = useCallback((description) => {
+    if (!description) return null;
+    return {
+      type: description.type,
+      sdp: description.sdp,
+    };
+  }, []);
+  const sendNegotiationOffer = useCallback(async (userId, peerConnection, signalingRoomId, reason = 'negotiationneeded') => {
+    const rid = signalingRoomId ?? roomId;
+    if (!rid || !userId || !peerConnection || peerConnection.signalingState === 'closed') return;
+
+    const state = getNegotiationState(userId);
+    if (state.makingOffer || peerConnection.signalingState !== 'stable') {
+      devLog('[negotiation] offer skipped', { userId, reason, signalingState: peerConnection.signalingState });
+      return;
+    }
+
+    try {
+      state.makingOffer = true;
+      ensureReceiveTransceivers(peerConnection);
+      await peerConnection.setLocalDescription();
+      if (peerConnection.localDescription?.type !== 'offer') return;
+      socket.emit('offer', {
+        to: userId,
+        offer: toSessionDescriptionPayload(peerConnection.localDescription),
+        roomId: rid,
+      });
+      devLog('[negotiation] offer sent', { userId, reason });
+    } catch (error) {
+      devError('[negotiation] offer failed', userId, error);
+      throw error;
+    } finally {
+      state.makingOffer = false;
+    }
+  }, [ensureReceiveTransceivers, getNegotiationState, roomId, toSessionDescriptionPayload]);
   const renegotiateAfterLocalStreamAttached = useCallback(async () => {
     const stream = localStreamRef.current;
     if (!stream || !roomId) return;
@@ -391,49 +553,37 @@ const VideoChat = () => {
     if (userIds.length === 0) return;
 
     for (const userId of userIds) {
-      const pc = peers[userId];
-      if (!pc || pc.signalingState === 'closed') continue;
+      const peerConnection = peers[userId];
+      if (!peerConnection || peerConnection.signalingState === 'closed') continue;
       try {
-        let added = false;
-        stream.getTracks().forEach((track) => {
-          const already = pc.getSenders().some((s) => s.track?.kind === track.kind);
-          if (!already) {
-            console.log('[renegotiate] addTrack', track.kind, '→ peer', userId);
-            pc.addTrack(track, stream);
-            added = true;
-          }
-        });
+        const added = await addLocalTracksToPeer(peerConnection);
         if (added) {
-          const offer = await pc.createOffer();
-          await pc.setLocalDescription(offer);
-          socket.emit('offer', { to: userId, offer, roomId });
-          console.log('[renegotiate] offer sent to', userId);
+          await sendNegotiationOffer(userId, peerConnection, roomId, 'local-stream-attached');
         }
       } catch (e) {
-        console.error('[renegotiate] failed for peer', userId, e);
+        devError('[renegotiate] failed for peer', userId, e);
       }
     }
-  }, [roomId]);
-
+  }, [addLocalTracksToPeer, roomId, sendNegotiationOffer]);
   const handleEnableCameraClick = async () => {
     if (!isSecureContextForMedia()) {
       const msg =
         'Camera and microphone require a secure page. Open the app over https or http://localhost (or 127.0.0.1).';
       setMediaError(msg);
-      console.error('[Enable Camera] blocked: not a secure context', window.location?.href);
+      devError('[Enable Camera] blocked: not a secure context', window.location?.href);
       return;
     }
     if (!navigator.mediaDevices?.getUserMedia) {
       setMediaError('This browser does not support camera/microphone access.');
-      console.error('[Enable Camera] getUserMedia not available');
+      devError('[Enable Camera] getUserMedia not available');
       return;
     }
     if (localStreamRef.current) {
-      console.log('[Enable Camera] stream already active, reusing');
+      devLog('[Enable Camera] stream already active, reusing');
       return;
     }
     if (mediaAcquireInProgressRef.current) {
-      console.log('[Enable Camera] request already in progress, ignoring duplicate click');
+      devLog('[Enable Camera] request already in progress, ignoring duplicate click');
       return;
     }
 
@@ -441,7 +591,7 @@ const VideoChat = () => {
     setMediaError('');
     setMediaWarning('');
     setMediaMode('initializing');
-    console.log('[Enable Camera] user gesture → permissions + enumerateDevices + getUserMedia');
+    devLog('[Enable Camera] user gesture → permissions + enumerateDevices + getUserMedia');
 
     try {
       await logMicrophonePermissionState();
@@ -449,23 +599,23 @@ const VideoChat = () => {
       const deviceId = await pickFirstVideoinputDeviceId();
       const micDeviceId = await pickFirstAudioinputDeviceId();
       if (deviceId) {
-        console.log('[Enable Camera] using explicit videoinput deviceId');
+        devLog('[Enable Camera] using explicit videoinput deviceId');
       } else {
-        console.log('[Enable Camera] no labeled video deviceId; using facingMode + ideal size');
+        devLog('[Enable Camera] no labeled video deviceId; using facingMode + ideal size');
       }
 
       const stream = await getUserMediaSafeWithFallback(deviceId, {
         audioDeviceId: micDeviceId,
       });
-      console.log('Tracks:', stream.getTracks());
-      console.log('Video tracks:', stream.getVideoTracks());
-      console.log('Audio tracks:', stream.getAudioTracks());
+      devLog('Tracks:', stream.getTracks());
+      devLog('Video tracks:', stream.getVideoTracks());
+      devLog('Audio tracks:', stream.getAudioTracks());
 
       const audioTracks = stream.getAudioTracks();
       if (audioTracks.length === 0) {
-        console.warn('No microphone detected');
+        devWarn('No microphone detected');
       } else {
-        console.log('Microphone working:', audioTracks[0].label || '(unnamed device)');
+        devLog('Microphone working:', audioTracks[0].label || '(unnamed device)');
       }
 
       setMediaReleasedHiddenTab(false);
@@ -477,7 +627,7 @@ const VideoChat = () => {
       const hasAudio = audioTracks.length > 0;
       setMediaMode(hasAudio ? 'video+audio' : 'video-only');
       setMediaWarning(hasAudio ? '' : MIC_UNAVAILABLE_WARNING);
-      console.log('[Enable Camera] success', {
+      devLog('[Enable Camera] success', {
         streamId: stream.id,
         tracks: stream.getTracks().map((t) => ({ kind: t.kind, readyState: t.readyState })),
       });
@@ -490,15 +640,15 @@ const VideoChat = () => {
         try {
           await el.play();
         } catch (e) {
-          console.warn('[Enable Camera] local video play()', e?.name, e?.message);
+          devWarn('[Enable Camera] local video play()', e?.name, e?.message);
         }
       });
       if (isJoined && roomId && Object.keys(peerConnectionsRef.current).length > 0) {
         await renegotiateAfterLocalStreamAttached();
       }
     } catch (err) {
-      console.error('Media error:', err?.name, err?.message);
-      console.error('[Enable Camera] failed', err);
+      devError('Media error:', err?.name, err?.message);
+      devError('[Enable Camera] failed', err);
       setError("Camera access denied or not available");
       setMediaError(messageFromMediaError(err));
       setMediaMode('no-media');
@@ -511,23 +661,23 @@ const VideoChat = () => {
   const createPeerConnection = useCallback((userId, iceRoomId) => {
     const signalingRoomId = iceRoomId ?? roomId;
     try {
-      console.log('Creating peer connection for:', userId);
-      
+      devLog('Creating peer connection for:', userId);
+
       const configuration = getRtcConfiguration();
 
       const peerConnection = new RTCPeerConnection(configuration);
 
       // Improved track handling
       peerConnection.ontrack = (event) => {
-        console.log('Received track:', event.track.kind, 'from:', userId);
+        devLog('Received track:', event.track.kind, 'from:', userId);
 
         const newStream =
           event.streams?.[0] ?? new MediaStream([event.track]);
-        
+
         // Ensure we're not duplicating streams
         setRemoteStreams(prevStreams => {
           const existingStreamIndex = prevStreams.findIndex(s => s.userId === userId);
-          
+
           if (existingStreamIndex >= 0) {
             // Update existing stream
             const updatedStreams = [...prevStreams];
@@ -537,7 +687,7 @@ const VideoChat = () => {
             };
             return updatedStreams;
           }
-          
+
           // Add new stream
           return [...prevStreams, {
             stream: newStream,
@@ -548,17 +698,17 @@ const VideoChat = () => {
 
         // Monitor track status
         event.track.onended = () => {
-          console.log('Track ended:', userId, event.track.kind);
-          handleTrackEnded(userId, event.track);
+          devLog('Track ended:', userId, event.track.kind);
+          handleTrackEndedRef.current(userId, event.track);
         };
       };
 
       // Enhanced ICE handling
       peerConnection.onicecandidate = (event) => {
         if (event.candidate) {
-          console.log('Sending ICE candidate to:', userId);
+          devLog('Sending ICE candidate to:', userId);
           if (!signalingRoomId) {
-            console.warn('[ICE] skip candidate emit: no roomId');
+            devWarn('[ICE] skip candidate emit: no roomId');
             return;
           }
           socket.emit("candidate", {
@@ -569,18 +719,21 @@ const VideoChat = () => {
         }
       };
 
+      peerConnection.onnegotiationneeded = () => {
+        void sendNegotiationOffer(userId, peerConnection, signalingRoomId);
+      };
       peerConnection.oniceconnectionstatechange = () => {
-        console.log(`ICE connection state (${userId}):`, peerConnection.iceConnectionState);
+        devLog(`ICE connection state (${userId}):`, peerConnection.iceConnectionState);
         if (peerConnection.iceConnectionState === 'failed') {
-          console.log('ICE connection failed, attempting restart...');
+          devLog('ICE connection failed, attempting restart...');
           peerConnection.restartIce();
         }
       };
 
       peerConnection.onconnectionstatechange = () => {
-        console.log(`Connection state (${userId}):`, peerConnection.connectionState);
+        devLog(`Connection state (${userId}):`, peerConnection.connectionState);
         if (peerConnection.connectionState === 'failed') {
-          handleConnectionFailure(userId);
+          handleConnectionFailureRef.current(userId);
         }
       };
 
@@ -588,10 +741,10 @@ const VideoChat = () => {
       peerConnectionsRef.current[userId] = peerConnection;
       return peerConnection;
     } catch (error) {
-      console.error('Error creating peer connection:', error);
+      devError('Error creating peer connection:', error);
       throw error;
     }
-  }, [roomId]);
+  }, [roomId, sendNegotiationOffer]);
 
   const enqueueIceCandidate = useCallback((remoteUserId, candidate) => {
     if (!remoteUserId || !candidate) return;
@@ -613,7 +766,7 @@ const VideoChat = () => {
           enqueueIceCandidate(remoteUserId, c);
         }
       } catch (e) {
-        console.warn('[ICE] flush add failed', remoteUserId, e?.name, e?.message);
+        devWarn('[ICE] flush add failed', remoteUserId, e?.name, e?.message);
         enqueueIceCandidate(remoteUserId, c);
       }
     }
@@ -621,8 +774,8 @@ const VideoChat = () => {
 
   // Add connection failure handler
   const handleConnectionFailure = useCallback((userId) => {
-    console.log('Handling connection failure for:', userId);
-    
+    devLog('Handling connection failure for:', userId);
+
     // Clean up failed connection
     if (peerConnectionsRef.current[userId]) {
       peerConnectionsRef.current[userId].close();
@@ -632,64 +785,61 @@ const VideoChat = () => {
     // Remove failed streams
     setRemoteStreams(prev => prev.filter(s => s.userId !== userId));
     delete pendingIceCandidatesRef.current[userId];
+    delete negotiationStateRef.current[userId];
 
     // Attempt reconnection
     setTimeout(() => {
-      if (isHost) {
-        console.log('Attempting reconnection...');
+      if (isHostRef.current) {
+        devLog('Attempting reconnection...');
         void initiateCallRef.current(userId);
       }
     }, 2000);
-  }, [isHost]);
+  }, []);
+
+  useEffect(() => {
+    handleConnectionFailureRef.current = handleConnectionFailure;
+  }, [handleConnectionFailure]);
 
   // Add track ended handler
   const handleTrackEnded = useCallback((userId, track) => {
-    console.log(`Track ${track.kind} ended for user ${userId}`);
+    devLog(`Track ${track.kind} ended for user ${userId}`);
     if (track.kind === 'video') {
       setRemoteVideoStates(prev => ({...prev, [userId]: true}));
     }
   }, []);
 
-  const buildJoinPayload = useCallback((rid) => {
-    const p = profileRef.current;
-    if (!p?.uid) return null;
-    return {
-      roomId: rid,
-      username: p.displayName,
-      displayName: p.displayName,
-      photoURL: p.photoURL || '',
-      firebaseUid: p.uid,
-    };
+  useEffect(() => {
+    handleTrackEndedRef.current = handleTrackEnded;
+  }, [handleTrackEnded]);
+
+  const buildJoinPayload = useCallback(async (rid) => {
+    if (!rid) return null;
+    const idToken = await getIdTokenRef.current();
+    return { roomId: rid, idToken };
   }, []);
 
-  // Handle room creation (profile from Firebase auth)
+  useEffect(() => {
+    buildJoinPayloadRef.current = buildJoinPayload;
+  }, [buildJoinPayload]);
+
+  // Handle room creation (identity verified via Firebase ID token on server)
   const createRoom = async () => {
     try {
-      const p = profileRef.current;
-      if (!p?.uid) {
+      if (!profileRef.current?.uid) {
         setError('You must be signed in to create a room.');
         return;
       }
-      socket.emit('createRoom', {
-        username: p.displayName,
-        displayName: p.displayName,
-        photoURL: p.photoURL || '',
-        firebaseUid: p.uid,
-      });
+      const idToken = await getIdTokenRef.current();
+      socket.emit('createRoom', { idToken });
     } catch (error) {
       setError(`Failed to create room: ${error.message}`);
     }
   };
 
-  // Add this function to check permissions
-  const checkMediaPermissions = async () => {
-    return true;
-  };
 
   const joinRoom = async (joinRoomId) => {
     try {
-      const p = profileRef.current;
-      if (!p?.uid) {
+      if (!profileRef.current?.uid) {
         setError('You must be signed in to join a room.');
         return;
       }
@@ -698,13 +848,13 @@ const VideoChat = () => {
         setError('Invalid Room ID');
         return;
       }
-      const payload = buildJoinPayload(rid);
-      console.log("[JOIN ROOM]", rid);
-      console.log('Attempting to join room:', { roomId: rid });
+      const payload = await buildJoinPayload(rid);
+      devLog("[JOIN ROOM]", rid);
+      devLog('Attempting to join room:', { roomId: rid });
       socket.emit('joinRoom', payload);
       setConnectionStatus('connecting');
     } catch (error) {
-      console.error('Join room error:', error);
+      devError('Join room error:', error);
       setError(`Failed to join room: ${error.message}`);
     }
   };
@@ -713,11 +863,11 @@ const VideoChat = () => {
   const initiateCall = useCallback(async (userId, signalingRoomId) => {
     const rid = signalingRoomId ?? roomId;
     if (!rid) {
-      console.warn('[initiateCall] skipped: no roomId yet');
+      devWarn('[initiateCall] skipped: no roomId yet');
       return;
     }
     try {
-      console.log('Initiating call with:', userId);
+      devLog('Initiating call with:', userId);
       let peerConnection = peerConnectionsRef.current[userId];
       if (!peerConnection) {
         peerConnection = createPeerConnection(userId, rid);
@@ -725,38 +875,18 @@ const VideoChat = () => {
 
       if (localStreamRef.current) {
         const tracks = localStreamRef.current.getTracks().filter((t) => t.readyState === 'live');
-        console.log(`Adding up to ${tracks.length} live tracks to peer connection`);
-        tracks.forEach((track) => {
-          const already = peerConnection.getSenders().some((s) => s.track?.kind === track.kind);
-          if (!already) {
-            console.log('Adding track:', track.kind);
-            peerConnection.addTrack(track, localStreamRef.current);
-          }
-        });
+        devLog(`Adding up to ${tracks.length} live tracks to peer connection`);
+        await addLocalTracksToPeer(peerConnection);
       } else {
-        console.log('No local stream available; creating receive-only peer connection');
+        devLog('No local stream available; creating receive-only peer connection');
       }
 
-      console.log('Creating offer for:', userId);
-      const offer = await peerConnection.createOffer({
-        offerToReceiveAudio: true,
-        offerToReceiveVideo: true,
-      });
-
-      await peerConnection.setLocalDescription(offer);
-
-      console.log('Sending offer to:', userId, 'roomId:', rid);
-      socket.emit('offer', {
-        to: userId,
-        offer,
-        roomId: rid,
-      });
+      await sendNegotiationOffer(userId, peerConnection, rid, 'initiate-call');
     } catch (error) {
-      console.error('Failed to initiate call:', error);
+      devError('Failed to initiate call:', error);
       handleConnectionFailure(userId);
     }
-  }, [roomId, createPeerConnection, handleConnectionFailure]);
-
+  }, [addLocalTracksToPeer, roomId, createPeerConnection, handleConnectionFailure, sendNegotiationOffer]);
   useEffect(() => {
     initiateCallRef.current = initiateCall;
   }, [initiateCall]);
@@ -765,7 +895,7 @@ const VideoChat = () => {
   useEffect(() => {
     socket.on('roomCreated', ({ roomId }) => {
       if (!roomId) {
-        console.error('No roomId received');
+        devError('No roomId received');
         return;
       }
       setRoomId(roomId);
@@ -774,18 +904,17 @@ const VideoChat = () => {
       setConnectionStatus('connected');
       setIsJoined(true);
       wasJoinedRef.current = true;
-      const payload = buildJoinPayload(roomId);
-      if (payload) rejoinPayloadRef.current = payload;
+      rejoinRoomIdRef.current = roomId;
       clearChat();
       navigator.clipboard.writeText(roomId);
       alert(`Room created! Room ID: ${roomId} (copied to clipboard)`);
     });
 
     socket.on('roomJoined', ({ roomId, users, isHost, chatHistory, watchVideoUrl: sharedWatchUrl, videoUrl }) => {
-      console.log('Room joined event received:', { roomId, users, isHost });
-      
+      devLog('Room joined event received:', { roomId, users, isHost });
+
       if (!roomId || !Array.isArray(users)) {
-        console.error('Invalid room data received:', { roomId, users });
+        devError('Invalid room data received:', { roomId, users });
         return;
       }
 
@@ -796,8 +925,7 @@ const VideoChat = () => {
       setConnectionStatus('connected');
       setIsJoined(true);
       wasJoinedRef.current = true;
-      const payload = buildJoinPayload(roomId);
-      if (payload) rejoinPayloadRef.current = payload;
+      rejoinRoomIdRef.current = roomId;
       setChatMessages(Array.isArray(chatHistory) ? chatHistory : []);
       setSyncedWatchVideoUrl(
         (videoUrl ?? sharedWatchUrl) === undefined || (videoUrl ?? sharedWatchUrl) === null
@@ -808,7 +936,7 @@ const VideoChat = () => {
       // Joiner offers to everyone already in the room (use event roomId — state may not have updated yet)
       users.forEach((user) => {
         if (user && user.id && user.id !== socket.id) {
-          console.log('Initializing connection with existing user:', user.id);
+          devLog('Initializing connection with existing user:', user.id);
           if (!peerConnectionsRef.current[user.id]) {
             initiateCall(user.id, roomId);
           }
@@ -818,52 +946,61 @@ const VideoChat = () => {
 
     socket.on('offer', async ({ from, offer }) => {
       try {
-        if (!roomId) {
-          console.error('[offer] missing roomId in handler');
+        if (!roomId || !from || !offer) {
+          devError('[offer] invalid payload');
           return;
         }
         let peerConnection = peerConnectionsRef.current[from];
         if (!peerConnection) {
           peerConnection = createPeerConnection(from, roomId);
         }
-        await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
-        await flushPendingIceCandidates(from);
 
-        if (localStreamRef.current) {
-          const liveTracks = localStreamRef.current.getTracks().filter((t) => t.readyState === 'live');
-          liveTracks.forEach((track) => {
-            const already = peerConnection.getSenders().some((s) => s.track?.kind === track.kind);
-            if (!already) {
-              peerConnection.addTrack(track, localStreamRef.current);
-            }
-          });
+        const description = new RTCSessionDescription(offer);
+        const negotiationState = getNegotiationState(from);
+        const readyForOffer =
+          !negotiationState.makingOffer &&
+          (peerConnection.signalingState === 'stable' || negotiationState.isSettingRemoteAnswerPending);
+        const offerCollision = description.type === 'offer' && !readyForOffer;
+
+        negotiationState.ignoreOffer = !isPolitePeer(from) && offerCollision;
+        if (negotiationState.ignoreOffer) {
+          devWarn('[negotiation] ignored colliding offer', { from });
+          return;
         }
 
-        const answer = await peerConnection.createAnswer({
-          offerToReceiveAudio: true,
-          offerToReceiveVideo: true,
-        });
-        await peerConnection.setLocalDescription(answer);
-        socket.emit('answer', { to: from, answer, roomId });
+        await peerConnection.setRemoteDescription(description);
+        await flushPendingIceCandidates(from);
+
+        await addLocalTracksToPeer(peerConnection);
+
+        await peerConnection.setLocalDescription();
+        socket.emit('answer', { to: from, answer: toSessionDescriptionPayload(peerConnection.localDescription), roomId });
       } catch (error) {
-        console.error('Error handling offer:', error);
+        devError('Error handling offer:', error);
       }
     });
 
     socket.on('answer', async ({ from, answer }) => {
       const peerConnection = peerConnectionsRef.current[from];
-      if (!peerConnection) return;
+      if (!peerConnection || !answer) return;
+      const negotiationState = getNegotiationState(from);
       try {
+        negotiationState.isSettingRemoteAnswerPending = true;
         await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
         await flushPendingIceCandidates(from);
       } catch (e) {
-        console.error('Error handling answer:', e);
+        devError('Error handling answer:', e);
+      } finally {
+        negotiationState.isSettingRemoteAnswerPending = false;
       }
     });
 
     socket.on('candidate', async ({ from, candidate }) => {
+      if (!candidate || !from) return;
+      const negotiationState = getNegotiationState(from);
+      if (negotiationState.ignoreOffer) return;
+
       const peerConnection = peerConnectionsRef.current[from];
-      if (!candidate) return;
       if (!peerConnection) {
         enqueueIceCandidate(from, candidate);
         return;
@@ -875,14 +1012,13 @@ const VideoChat = () => {
       try {
         await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
       } catch (e) {
-        console.warn('[ICE] addCandidate failed, queueing', from, e?.name);
+        devWarn('[ICE] addCandidate failed, queueing', from, e?.name);
         enqueueIceCandidate(from, candidate);
       }
     });
-
     socket.on('chatMessage', (messageData) => {
       if (!messageData || !messageData.userId) {
-        console.error('Invalid message data:', messageData);
+        devError('Invalid message data:', messageData);
         return;
       }
       setChatMessages(prev => [...prev, messageData]);
@@ -913,19 +1049,19 @@ const VideoChat = () => {
 
     socket.on('userLeft', (user) => {
       if (!user || !user.id) {
-        console.error('Invalid user data for disconnect:', user);
+        devError('Invalid user data for disconnect:', user);
         return;
       }
-      handleUserDisconnected(user.id);
+      handleUserDisconnectedRef.current(user.id);
     });
 
     socket.on('callEnded', () => {
       alert('Call has been ended by the host');
-      leaveCall();
+      leaveCallRef.current();
     });
 
     socket.on('error', ({ message }) => {
-      console.error('Socket error:', message);
+      devError('Socket error:', message);
       setError(message);
       setConnectionStatus('disconnected');
     });
@@ -937,11 +1073,11 @@ const VideoChat = () => {
     });
 
     socket.on('userSpeaking', ({ userId, speaking }) => {
-      handleSpeakingStateChange(userId, speaking);
+      handleSpeakingStateChangeRef.current(userId, speaking);
     });
 
     socket.on('videoStateChanged', ({ userId, isVideoOff }) => {
-      console.log('Remote video state changed:', userId, isVideoOff);
+      devLog('Remote video state changed:', userId, isVideoOff);
       setRemoteVideoStates(prev => ({
         ...prev,
         [userId]: isVideoOff
@@ -949,10 +1085,10 @@ const VideoChat = () => {
     });
 
     socket.on('userJoined', ({ user }) => {
-      console.log('New user joined:', user);
-      
+      devLog('New user joined:', user);
+
       if (!user || !user.id) {
-        console.error('Invalid user data received:', user);
+        devError('Invalid user data received:', user);
         return;
       }
 
@@ -990,25 +1126,25 @@ const VideoChat = () => {
       socket.off('hostChanged');
       socket.off('errorMessage');
     };
-  }, [roomId, initiateCall, createPeerConnection, flushPendingIceCandidates, enqueueIceCandidate, buildJoinPayload]);
+  }, [roomId, initiateCall, createPeerConnection, flushPendingIceCandidates, enqueueIceCandidate, addLocalTracksToPeer, getNegotiationState, isPolitePeer, toSessionDescriptionPayload]);
 
   // Clean up when I leave or someone else leaves
   const handleUserDisconnected = (userId) => {
     if (!userId) {
-      console.error('Invalid userId for disconnection');
+      devError('Invalid userId for disconnection');
       return;
     }
 
     cleanupPeerConnection(userId);
-    
-    setRemoteStreams(prev => prev.filter(streamInfo => 
+
+    setRemoteStreams(prev => prev.filter(streamInfo =>
       streamInfo && streamInfo.userId && streamInfo.userId !== userId
     ));
-    
-    setParticipants(prev => prev.filter(p => 
+
+    setParticipants(prev => prev.filter(p =>
       p && p.id && p.id !== userId
     ));
-    
+
     setRemoteVideoStates(prev => {
       if (!prev) return {};
       const newStates = { ...prev };
@@ -1016,6 +1152,10 @@ const VideoChat = () => {
       return newStates;
     });
   };
+
+  useEffect(() => {
+    handleUserDisconnectedRef.current = handleUserDisconnected;
+  });
 
   // My controls for video/audio
   const toggleAudio = () => {
@@ -1036,7 +1176,7 @@ const VideoChat = () => {
         track.stop();
         try {
           stream.removeTrack(track);
-        } catch (_) {
+        } catch {
           /* ignore */
         }
       });
@@ -1096,9 +1236,9 @@ const VideoChat = () => {
         throw new Error('No video track from camera');
       }
 
-      console.log('Tracks:', fresh.getTracks());
-      console.log('Video tracks:', fresh.getVideoTracks());
-      console.log('Audio tracks:', fresh.getAudioTracks());
+      devLog('Tracks:', fresh.getTracks());
+      devLog('Video tracks:', fresh.getVideoTracks());
+      devLog('Audio tracks:', fresh.getAudioTracks());
 
       if (hadLiveAudio) {
         fresh.getAudioTracks().forEach((t) => t.stop());
@@ -1122,22 +1262,18 @@ const VideoChat = () => {
 
       const at = merged.getAudioTracks();
       if (at.length === 0) {
-        console.warn('No microphone detected');
+        devWarn('No microphone detected');
       } else {
-        console.log('Microphone working:', at[0].label || '(unnamed device)');
+        devLog('Microphone working:', at[0].label || '(unnamed device)');
       }
-
-      Object.values(peerConnectionsRef.current).forEach((pc) => {
+      for (const [userId, pc] of Object.entries(peerConnectionsRef.current)) {
         const sender = pc.getSenders().find((s) => s.track?.kind === 'video');
         if (sender) {
-          sender.replaceTrack(vTrack);
+          await sender.replaceTrack(vTrack);
         } else {
           pc.addTrack(vTrack, merged);
+          await sendNegotiationOffer(userId, pc, roomId, 'camera-restored');
         }
-      });
-
-      if (isJoined && roomId && Object.keys(peerConnectionsRef.current).length > 0) {
-        await renegotiateAfterLocalStreamAttached();
       }
 
       queueMicrotask(async () => {
@@ -1148,21 +1284,20 @@ const VideoChat = () => {
         try {
           await el.play();
         } catch (e) {
-          console.warn('[toggleVideo ON] play()', e?.name, e?.message);
+          devWarn('[toggleVideo ON] play()', e?.name, e?.message);
         }
       });
 
       setIsVideoOff(false);
       socket.emit('videoStateChange', { roomId, isVideoOff: false });
     } catch (err) {
-      console.error('[toggleVideo] camera on failed', err?.name, err?.message);
+      devError('[toggleVideo] camera on failed', err?.name, err?.message);
       setError("Camera access denied or not available");
       setMediaError(messageFromMediaError(err));
     } finally {
       mediaAcquireInProgressRef.current = false;
     }
   };
-
   // Let me share my screen
   const toggleScreenShare = async () => {
     if (isScreenSharing) {
@@ -1174,67 +1309,74 @@ const VideoChat = () => {
 
   const startScreenShare = async () => {
     try {
+      if (screenShareStreamRef.current) {
+        await stopScreenShare();
+      }
+
       const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
       const videoTrack = screenStream.getVideoTracks()[0];
       if (!videoTrack) {
         setError('No display video track from getDisplayMedia');
+        screenStream.getTracks().forEach((track) => track.stop());
         return;
       }
 
-      let addedNewVideoSender = false;
-      for (const peerConnection of Object.values(peerConnectionsRef.current)) {
+      screenShareStreamRef.current = screenStream;
+
+      for (const [userId, peerConnection] of Object.entries(peerConnectionsRef.current)) {
         const sender = peerConnection.getSenders().find((s) => s.track?.kind === 'video');
         if (sender) {
           await sender.replaceTrack(videoTrack);
         } else {
           peerConnection.addTrack(videoTrack, screenStream);
-          addedNewVideoSender = true;
+          await sendNegotiationOffer(userId, peerConnection, roomId, 'screen-share-start');
         }
       }
 
-      if (addedNewVideoSender && roomId) {
-        for (const userId of Object.keys(peerConnectionsRef.current)) {
-          const pc = peerConnectionsRef.current[userId];
-          if (!pc || pc.signalingState === 'closed') continue;
-          try {
-            const offer = await pc.createOffer();
-            await pc.setLocalDescription(offer);
-            socket.emit('offer', { to: userId, offer, roomId });
-          } catch (e) {
-            console.error('[screen share] renegotiate offer failed', userId, e);
-          }
-        }
-      }
-
-      videoTrack.onended = stopScreenShare;
+      videoTrack.onended = () => {
+        void stopScreenShare();
+      };
       setIsScreenSharing(true);
     } catch (error) {
-      console.error("Error starting screen share:", error);
+      devError("Error starting screen share:", error);
       setError("Failed to start screen sharing");
     }
   };
 
   const stopScreenShare = async () => {
     try {
-      const videoTrack = localStreamRef.current
+      const screenStream = screenShareStreamRef.current;
+      screenShareStreamRef.current = null;
+
+      const cameraTrack = localStreamRef.current
         ?.getVideoTracks()
-        .find((t) => t.readyState === 'live');
-      if (!videoTrack) {
-        setIsScreenSharing(false);
-        return;
-      }
-      Object.values(peerConnectionsRef.current).forEach(peerConnection => {
-        const sender = peerConnection.getSenders().find(s => s.track?.kind === 'video');
-        if (sender) {
-          sender.replaceTrack(videoTrack);
+        .find((track) => track.readyState === 'live') || null;
+
+      await Promise.all(
+        Object.values(peerConnectionsRef.current).map(async (peerConnection) => {
+          const sender = peerConnection.getSenders().find((s) => s.track?.kind === 'video');
+          if (sender) {
+            await sender.replaceTrack(cameraTrack);
+          }
+        })
+      );
+
+      screenStream?.getTracks().forEach((track) => {
+        track.onended = null;
+        if (track.readyState !== 'ended') {
+          track.stop();
         }
       });
+
       setIsScreenSharing(false);
+      if (!cameraTrack && roomId) {
+        socket.emit('videoStateChange', { roomId, isVideoOff: true });
+      }
     } catch (error) {
-      console.error("Error stopping screen share:", error);
+      devError("Error stopping screen share:", error);
+      setIsScreenSharing(false);
     }
   };
-
   const handleChatInputChange = (e) => {
     const v = e.target.value;
     setMessage(v);
@@ -1261,14 +1403,14 @@ const VideoChat = () => {
           socket.emit('chatTyping', { roomId, isTyping: false });
         }
         const messageToSend = message.trim();
-        console.log('Sending message:', { roomId, message: messageToSend });
+        devLog('Sending message:', { roomId, message: messageToSend });
         socket.emit('chatMessage', {
           roomId,
           message: messageToSend,
         });
         setMessage('');
       } catch (error) {
-        console.error('Error sending message:', error);
+        devError('Error sending message:', error);
         setError('Failed to send message');
       }
     }
@@ -1276,10 +1418,10 @@ const VideoChat = () => {
 
   // Add these functions to your VideoChat component
   const leaveCall = () => {
-    console.log('Leaving call...');
+    devLog('Leaving call...');
     try {
       wasJoinedRef.current = false;
-      rejoinPayloadRef.current = null;
+      rejoinRoomIdRef.current = null;
       setSyncedWatchVideoUrl(null);
       setSocketReconnecting(false);
       setTypingPeers({});
@@ -1293,16 +1435,23 @@ const VideoChat = () => {
 
       // Close and cleanup peer connections
       Object.entries(peerConnectionsRef.current).forEach(([userId, pc]) => {
-        console.log(`Closing connection with ${userId}`);
+        devLog(`Closing connection with ${userId}`);
         pc.close();
       });
       peerConnectionsRef.current = {};
-      
+      pendingIceCandidatesRef.current = {};
+      negotiationStateRef.current = {};
+
+      if (screenShareStreamRef.current) {
+        screenShareStreamRef.current.getTracks().forEach((track) => track.stop());
+        screenShareStreamRef.current = null;
+      }
+
       // Stop all local tracks
       if (localStreamRef.current) {
         localStreamRef.current.getTracks().forEach(track => {
           track.stop();
-          console.log(`Stopped track: ${track.kind}`);
+          devLog(`Stopped track: ${track.kind}`);
         });
       }
       localStreamRef.current = null;
@@ -1322,21 +1471,29 @@ const VideoChat = () => {
       setIsCallStarted(false);
       setIsJoined(false);
       clearChat();
-      
+
       // Notify server
       socket.emit('leaveRoom', { roomId });
-      console.log('Left room:', roomId);
+      devLog('Left room:', roomId);
     } catch (error) {
-      console.error('Error during call cleanup:', error);
+      devError('Error during call cleanup:', error);
       setError('Failed to properly clean up call');
     }
   };
 
-  const endCall = () => {
-    if (isHost) {
-      socket.emit('endCall', { roomId });
-      leaveCall();
+  useEffect(() => {
+    leaveCallRef.current = leaveCall;
+  });
+
+  const endCall = async () => {
+    if (!isHost) return;
+    try {
+      const idToken = await getIdTokenRef.current();
+      socket.emit('endCall', { roomId, idToken });
+      leaveCallRef.current();
       clearChat();
+    } catch (error) {
+      setError(`Failed to end call: ${error.message}`);
     }
   };
 
@@ -1349,7 +1506,7 @@ const VideoChat = () => {
   useEffect(() => {
     const logConnectionState = () => {
       Object.entries(peerConnectionsRef.current).forEach(([userId, pc]) => {
-        console.log(`Connection state with ${userId}:`, {
+        devLog(`Connection state with ${userId}:`, {
           connectionState: pc.connectionState,
           iceConnectionState: pc.iceConnectionState,
           signalingState: pc.signalingState
@@ -1363,7 +1520,7 @@ const VideoChat = () => {
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    console.log('[media] page context', {
+    devLog('[media] page context', {
       href: window.location.href,
       isSecureContext: window.isSecureContext,
     });
@@ -1372,6 +1529,10 @@ const VideoChat = () => {
   useEffect(() => {
     const onVisibility = () => {
       if (!document.hidden || !localStreamRef.current) return;
+      if (screenShareStreamRef.current) {
+        screenShareStreamRef.current.getTracks().forEach((track) => track.stop());
+        screenShareStreamRef.current = null;
+      }
       localStreamRef.current.getTracks().forEach((track) => track.stop());
       localStreamRef.current = null;
       setLocalStream(null);
@@ -1412,13 +1573,13 @@ const VideoChat = () => {
     }
     el.srcObject = null;
     el.srcObject = localStream;
-    console.log('[local video] stream.getTracks()', localStream.getTracks());
-    console.log('Video tracks:', localStream.getVideoTracks());
-    console.log('Audio tracks:', localStream.getAudioTracks());
+    devLog('[local video] stream.getTracks()', localStream.getTracks());
+    devLog('Video tracks:', localStream.getVideoTracks());
+    devLog('Audio tracks:', localStream.getAudioTracks());
     const p = el.play();
     if (p && typeof p.then === 'function') {
       p.catch((err) => {
-        console.warn('[local video] play()', err?.name, err?.message);
+        devWarn('[local video] play()', err?.name, err?.message);
       });
     }
   }, [localStream, isJoined, isVideoOff, focusTileId, maximizedTileId]);
@@ -1426,7 +1587,7 @@ const VideoChat = () => {
   // Add this useEffect to monitor video element and stream
   useEffect(() => {
     if (localVideoRef.current) {
-      console.log('Local video element:', {
+      devLog('Local video element:', {
         srcObject: localVideoRef.current.srcObject,
         readyState: localVideoRef.current.readyState,
         videoWidth: localVideoRef.current.videoWidth,
@@ -1434,9 +1595,9 @@ const VideoChat = () => {
         paused: localVideoRef.current.paused
       });
     }
-    
+
     if (localStreamRef.current) {
-      console.log('Local stream:', {
+      devLog('Local stream:', {
         active: localStreamRef.current.active,
         tracks: localStreamRef.current.getTracks().map(track => ({
           kind: track.kind,
@@ -1453,7 +1614,7 @@ const VideoChat = () => {
       if (localStreamRef.current) {
         const videoTrack = localStreamRef.current.getVideoTracks()[0];
         if (videoTrack) {
-          console.log('Video track status:', {
+          devLog('Video track status:', {
             enabled: videoTrack.enabled,
             muted: videoTrack.muted,
             readyState: videoTrack.readyState,
@@ -1461,7 +1622,7 @@ const VideoChat = () => {
             settings: videoTrack.getSettings()
           });
         } else {
-          console.error('No video track found');
+          devError('No video track found');
         }
       }
     };
@@ -1482,13 +1643,17 @@ const VideoChat = () => {
     }
   }, []);
 
+  useEffect(() => {
+    handleSpeakingStateChangeRef.current = handleSpeakingStateChange;
+  }, [handleSpeakingStateChange]);
+
   // Optional local speaking indicator — only when the stream includes an audio track
   useEffect(() => {
     if (!localStream) return;
 
     const audioTracks = localStream.getAudioTracks();
     if (audioTracks.length === 0) {
-      console.warn('No audio track available, skipping audio processing');
+      devWarn('No audio track available, skipping audio processing');
       return;
     }
 
@@ -1497,7 +1662,7 @@ const VideoChat = () => {
     try {
       audioSource = audioContext.createMediaStreamSource(localStream);
     } catch (e) {
-      console.warn('Could not create MediaStreamSource:', e?.name, e?.message);
+      devWarn('Could not create MediaStreamSource:', e?.name, e?.message);
       audioContext.close();
       return;
     }
@@ -1570,10 +1735,13 @@ const VideoChat = () => {
   useEffect(() => {
     const checkSocketConnection = () => {
       if (!socket || !socket.connected) {
-        console.error('Socket disconnected');
-        setError('Connection lost. Please refresh the page.');
-        setConnectionStatus('disconnected');
+        if (wasJoinedRef.current && isJoinedRef.current) {
+          setSocketReconnecting(true);
+          setConnectionStatus('disconnected');
+        }
+        return;
       }
+      setSocketReconnecting(false);
     };
 
     const interval = setInterval(checkSocketConnection, 5000);
@@ -1583,11 +1751,11 @@ const VideoChat = () => {
   // Add cleanup for streams when component unmounts
   useEffect(() => {
     if (!localStream) {
-      console.log('Local stream status: no active local stream');
+      devLog('Local stream status: no active local stream');
       return;
     }
 
-    console.log('Local stream status: active', {
+    devLog('Local stream status: active', {
       streamId: localStream.id,
       tracks: localStream.getTracks().map(track => ({
         kind: track.kind,
@@ -1601,20 +1769,24 @@ const VideoChat = () => {
   // Add cleanup for streams when component unmounts
   useEffect(() => {
     return () => {
+      if (screenShareStreamRef.current) {
+        screenShareStreamRef.current.getTracks().forEach((track) => track.stop());
+        screenShareStreamRef.current = null;
+      }
+
       // Stop all tracks in local stream
       if (localStreamRef.current) {
-        localStreamRef.current.getTracks().forEach(track => track.stop());
+        localStreamRef.current.getTracks().forEach((track) => track.stop());
       }
-      
+
       // Stop all remote streams
-      remoteStreams.forEach(streamInfo => {
+      remoteStreamsRef.current.forEach((streamInfo) => {
         if (streamInfo.stream) {
-          streamInfo.stream.getTracks().forEach(track => track.stop());
+          streamInfo.stream.getTracks().forEach((track) => track.stop());
         }
       });
     };
   }, []);
-
   // Add a useEffect to handle automatic video playing
   useEffect(() => {
     const handleUserInteraction = () => {
@@ -1622,7 +1794,7 @@ const VideoChat = () => {
       videos.forEach(video => {
         if (video.paused) {
           video.play().catch(err => {
-            console.warn('Play after user interaction failed:', err);
+            devWarn('Play after user interaction failed:', err);
           });
         }
       });
@@ -1640,18 +1812,19 @@ const VideoChat = () => {
 
   // Update cleanup function
   const cleanupPeerConnection = (userId) => {
-    console.log('Cleaning up peer connection for:', userId);
-    
+    devLog('Cleaning up peer connection for:', userId);
+
     const peerConnection = peerConnectionsRef.current[userId];
     if (peerConnection) {
       // Close the connection
       peerConnection.close();
       delete peerConnectionsRef.current[userId];
       delete pendingIceCandidatesRef.current[userId];
+      delete negotiationStateRef.current[userId];
 
       // Remove from remote streams
       setRemoteStreams(prev => prev.filter(s => s.userId !== userId));
-      
+
       // Reset video state
       setRemoteVideoStates(prev => {
         const newStates = { ...prev };
@@ -1726,7 +1899,13 @@ const VideoChat = () => {
   if (!isJoined) {
     return (
       <div className="flex min-h-0 w-full flex-1 flex-col overflow-auto video-chat-root video-chat-root--join">
-        {error ? <ErrorCard message={error} /> : null}
+        {error ? (
+          <ErrorCard
+            message={error}
+            retry={() => setError(null)}
+            continueWithoutCamera={() => setError(null)}
+          />
+        ) : null}
         {renderMediaErrorBanner()}
         {mediaWarning ? <div className="status-error">{mediaWarning}</div> : null}
         <div className="media-mode-row media-mode-row--join">{renderMediaModeBadge()}</div>
@@ -1738,7 +1917,13 @@ const VideoChat = () => {
 
   return (
     <div className="flex min-h-0 w-full flex-1 flex-col overflow-hidden video-chat-root">
-      {error ? <ErrorCard message={error} /> : null}
+      {error ? (
+        <ErrorCard
+          message={error}
+          retry={() => setError(null)}
+          continueWithoutCamera={() => setError(null)}
+        />
+      ) : null}
       <ReactionFloatLayer trigger={reactionTrigger} />
       <ConnectionStatus
         status={connectionStatus}

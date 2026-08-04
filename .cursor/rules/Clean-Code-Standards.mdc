@@ -1,0 +1,19 @@
+---
+alwaysApply: true
+---
+
+Always follow these coding standards:
+
+- Meaningful variable names
+- Single responsibility principle
+- DRY
+- KISS
+- Avoid duplicate logic
+- Handle edge cases
+- Validate inputs
+- Add error handling
+- Avoid hardcoded values
+- Keep files organized
+- Remove dead code
+- Format code consistently
+- Never introduce unnecessary dependencies.

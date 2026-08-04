@@ -9,6 +9,16 @@ const { getAuth } = require('firebase-admin/auth');
 
 let initAttempted = false;
 let ready = false;
+const isProduction = process.env.NODE_ENV === 'production';
+const log = (...args) => {
+    if (!isProduction) console.log(...args);
+};
+const warn = (...args) => {
+    if (!isProduction) console.warn(...args);
+};
+const error = (...args) => {
+    if (!isProduction) console.error(...args);
+};
 
 function parseServiceAccountFromEnv() {
     const json = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
@@ -51,7 +61,7 @@ function initFirebaseAdmin() {
                 }),
             });
             ready = true;
-            console.log('[auth] Firebase Admin initialized (service account)');
+            log('[auth] Firebase Admin initialized (service account)');
             return ready;
         }
 
@@ -60,17 +70,17 @@ function initFirebaseAdmin() {
                 credential: applicationDefault(),
             });
             ready = true;
-            console.log('[auth] Firebase Admin initialized (application default)');
+            log('[auth] Firebase Admin initialized (application default)');
             return ready;
         }
 
-        console.warn(
+        warn(
             '[auth] Firebase Admin not configured. Set FIREBASE_SERVICE_ACCOUNT_JSON or FIREBASE_PROJECT_ID + FIREBASE_CLIENT_EMAIL + FIREBASE_PRIVATE_KEY. Privileged socket events will be rejected.'
         );
         ready = false;
         return ready;
     } catch (err) {
-        console.error('[auth] Firebase Admin init failed:', err?.message || err);
+        error('[auth] Firebase Admin init failed:', err?.message || err);
         ready = false;
         return ready;
     }

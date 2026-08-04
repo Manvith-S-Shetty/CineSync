@@ -15,6 +15,17 @@ import {
 } from '../utils/videoUrlUtils';
 import '../styles/VideoPlayer.css';
 
+const isDev = import.meta.env.DEV;
+const devLog = (...args) => {
+  if (isDev) console.log(...args);
+};
+const devWarn = (...args) => {
+  if (isDev) console.warn(...args);
+};
+const devError = (...args) => {
+  if (isDev) console.error(...args);
+};
+
 const LOAD_FAILED_MESSAGE = 'Video failed to load';
 const HOST_SYNC_INTERVAL_MS = 1000;
 const HOST_SYNC_SEEK_TOLERANCE_SECONDS = 0.75;
@@ -56,14 +67,14 @@ const VideoPlayer = forwardRef(function VideoPlayer(
 
   const broadcastWatchUrl = useCallback(
     (videoUrl) => {
-      if (!isHost || !roomId || !socket.connected) return;
+       if (!isHost || !roomId || !socket.connected) return;
       void (async () => {
         try {
           const idToken = await getIdToken();
           socket.emit('videoChange', { roomId, videoUrl, idToken });
           socket.emit('watchVideoUrl', { roomId, videoUrl, idToken });
         } catch (err) {
-          console.error('[VideoPlayer] auth required to change video', err);
+          devError('[VideoPlayer] auth required to change video', err);
           setError?.('Authentication required to change video.');
         }
       })();
@@ -90,7 +101,7 @@ const VideoPlayer = forwardRef(function VideoPlayer(
       pendingRemotePlayRef.current = false;
       return true;
     } catch (error) {
-      console.error('Video play failed (autoplay policy or interaction needed):', error);
+      devError('Video play failed (autoplay policy or interaction needed):', error);
       setPlaybackBlocked(true);
       return false;
     }
@@ -101,7 +112,7 @@ const VideoPlayer = forwardRef(function VideoPlayer(
     if (videoRef.current.paused) {
       tryPlayVideo();
     }
-    console.log('emitting play/pause', { type: 'play', roomId, time: videoRef.current.currentTime || 0 });
+    devLog('emitting play/pause', { type: 'play', roomId, time: videoRef.current.currentTime || 0 });
     socket.emit('videoPlay', {
       roomId,
       currentTime: videoRef.current.currentTime || 0,
@@ -111,7 +122,7 @@ const VideoPlayer = forwardRef(function VideoPlayer(
 
   const handlePause = () => {
     if (!isHost || !roomId || isSyncingRef.current || !videoRef.current) return;
-    console.log('emitting play/pause', { type: 'pause', roomId, time: videoRef.current.currentTime || 0 });
+    devLog('emitting play/pause', { type: 'pause', roomId, time: videoRef.current.currentTime || 0 });
     socket.emit('videoPause', {
       roomId,
       currentTime: videoRef.current.currentTime || 0,
@@ -146,7 +157,7 @@ const VideoPlayer = forwardRef(function VideoPlayer(
   }, [fileInputId]);
 
   const handleVideoLoadedData = useCallback(() => {
-    console.log('[VideoPlayer] onLoadedData: success', {
+    devLog('[VideoPlayer] onLoadedData: success', {
       src: videoSrcRef.current,
     });
     setLoadError(null);
@@ -158,7 +169,7 @@ const VideoPlayer = forwardRef(function VideoPlayer(
     const code = el?.error?.code;
     const message = el?.error?.message;
     const failedSrc = videoSrcRef.current;
-    console.error('[VideoPlayer] onError: video failed to load', {
+    devError('[VideoPlayer] onError: video failed to load', {
       src: failedSrc,
       code,
       message,
@@ -172,13 +183,14 @@ const VideoPlayer = forwardRef(function VideoPlayer(
 
   const handleLocalFileChange = useCallback(
     (e) => {
-      if (!isHost) return;
+      // if (!isHost) return; //It give acces only for the host 
       const file = e.target.files?.[0];
       if (!file || !file.type.startsWith('video/')) {
         return;
       }
       revokeBlobUrl();
       const url = URL.createObjectURL(file);
+      //const url = await uploadVideo(file); //To-Do later
       objectUrlRef.current = url;
       setVideoSrc(url);
       setLocalFileLabel(file.name);
@@ -196,7 +208,7 @@ const VideoPlayer = forwardRef(function VideoPlayer(
       if (e.target) e.target.value = '';
       if (isHost && roomId) {
         broadcastWatchUrl(null);
-        console.log('[VideoPlayer] local file selected; cleared shared watch URL for room');
+        devLog('[VideoPlayer] local file selected; cleared shared watch URL for room');
       }
     },
     [revokeBlobUrl, isHost, roomId, broadcastWatchUrl]
@@ -221,15 +233,15 @@ const VideoPlayer = forwardRef(function VideoPlayer(
     }
     if (isHost && roomId) {
       broadcastWatchUrl(DEFAULT_VIDEO_SAMPLE_URL);
-      console.log('[VideoPlayer] host switched to sample video; broadcasting URL');
+      devLog('[VideoPlayer] host switched to sample video; broadcasting URL');
     }
   }, [revokeBlobUrl, isHost, roomId, broadcastWatchUrl]);
 
   const loadUrl = useCallback(
     (raw) => {
-      if (!isHost) {
-        return { ok: false, error: 'Only the host can change the video' };
-      }
+      // if (!isHost) {
+      //   return { ok: false, error: 'Only the host can change the video' };
+      // }
       if (!socket || !socket.connected) {
         setInlineUrlError('Server not connected');
         return { ok: false, error: 'Server not connected' };
@@ -239,17 +251,17 @@ const VideoPlayer = forwardRef(function VideoPlayer(
         setInlineUrlError('Enter a video URL.');
         return { ok: false, error: 'Enter a video URL.' };
       }
-      console.log('[VideoPlayer] loadUrl called', {
+      devLog('[VideoPlayer] loadUrl called', {
         length: rawStr.length,
         preview: rawStr.trim().slice(0, 120),
       });
       const v = validateDirectVideoUrl(rawStr);
       if (!v.ok) {
-        console.warn('[VideoPlayer] loadUrl validation failed:', v.error);
+        devWarn('[VideoPlayer] loadUrl validation failed:', v.error);
         setInlineUrlError(v.error);
         return { ok: false, error: v.error };
       }
-      console.log('[VideoPlayer] loading validated video URL:', v.url);
+      devLog('[VideoPlayer] loading validated video URL:', v.url);
       setInlineUrlError(null);
       setLoadError(null);
       revokeBlobUrl();
@@ -264,7 +276,7 @@ const VideoPlayer = forwardRef(function VideoPlayer(
       }
       if (roomId) {
         broadcastWatchUrl(v.url);
-        console.log('[VideoPlayer] broadcast videoChange to room:', roomId);
+        devLog('[VideoPlayer] broadcast videoChange to room:', roomId);
       }
       return { ok: true };
     },
@@ -275,7 +287,7 @@ const VideoPlayer = forwardRef(function VideoPlayer(
     if (!lastAttemptedUrl) return;
     const v = validateDirectVideoUrl(lastAttemptedUrl);
     if (!v.ok) return;
-    console.log('[VideoPlayer] retry: reloading URL', v.url);
+    devLog('[VideoPlayer] retry: reloading URL', v.url);
     setLoadError(null);
     setVideoSrc(v.url);
     setIsVideoLoading(true);
@@ -313,11 +325,11 @@ const VideoPlayer = forwardRef(function VideoPlayer(
   useLayoutEffect(() => {
     const el = videoRef.current;
     if (!el || !videoSrc) return;
-    console.log('[VideoPlayer] useLayoutEffect: video.load() after src update', videoSrc);
+    devLog('[VideoPlayer] useLayoutEffect: video.load() after src update', videoSrc);
     try {
       el.load();
     } catch (err) {
-      console.error('[VideoPlayer] video.load() threw:', err);
+      devError('[VideoPlayer] video.load() threw:', err);
     }
   }, [videoSrc]);
 
@@ -329,7 +341,7 @@ const VideoPlayer = forwardRef(function VideoPlayer(
       if (syncedWatchVideoUrl === null) return;
       const v = validateDirectVideoUrl(syncedWatchVideoUrl);
       if (!v.ok) {
-        console.warn('[VideoPlayer] host: ignoring invalid synced URL');
+        devWarn('[VideoPlayer] host: ignoring invalid synced URL');
         return;
       }
       if (v.url === videoSrcRef.current) return;
@@ -340,7 +352,7 @@ const VideoPlayer = forwardRef(function VideoPlayer(
       setLastAttemptedUrl(v.url);
       setVideoSrc(v.url);
       setIsVideoLoading(true);
-      console.log('[VideoPlayer] host applied synced room URL (rejoin)', v.url);
+      devLog('[VideoPlayer] host applied synced room URL (rejoin)', v.url);
       return;
     }
 
@@ -353,13 +365,13 @@ const VideoPlayer = forwardRef(function VideoPlayer(
       setLastAttemptedUrl(DEFAULT_VIDEO_SAMPLE_URL);
       setVideoSrc(DEFAULT_VIDEO_SAMPLE_URL);
       setIsVideoLoading(true);
-      console.log('[VideoPlayer] guest: host cleared shared URL — using sample');
+      devLog('[VideoPlayer] guest: host cleared shared URL — using sample');
       return;
     }
 
     const v = validateDirectVideoUrl(syncedWatchVideoUrl);
     if (!v.ok) {
-      console.warn('[VideoPlayer] guest: invalid synced URL ignored', syncedWatchVideoUrl);
+      devWarn('[VideoPlayer] guest: invalid synced URL ignored', syncedWatchVideoUrl);
       return;
     }
     if (v.url === videoSrcRef.current) return;
@@ -370,7 +382,7 @@ const VideoPlayer = forwardRef(function VideoPlayer(
     setLastAttemptedUrl(v.url);
     setVideoSrc(v.url);
     setIsVideoLoading(true);
-    console.log('[VideoPlayer] guest applied synced watch URL', v.url);
+    devLog('[VideoPlayer] guest applied synced watch URL', v.url);
   }, [syncedWatchVideoUrl, isHost, revokeBlobUrl]);
 
   useEffect(() => {
@@ -378,7 +390,7 @@ const VideoPlayer = forwardRef(function VideoPlayer(
 
     const handleRemotePlay = ({ currentTime: remoteTime }) => {
       if (!videoRef.current) return;
-      console.log('sync event received', { type: 'play', roomId, time: remoteTime });
+      devLog('sync event received', { type: 'play', roomId, time: remoteTime });
       runSyncedUpdate(async () => {
         if (typeof remoteTime === 'number') {
           videoRef.current.currentTime = remoteTime;
@@ -391,7 +403,7 @@ const VideoPlayer = forwardRef(function VideoPlayer(
 
     const handleRemotePause = ({ currentTime: remoteTime }) => {
       if (!videoRef.current) return;
-      console.log('sync event received', { type: 'pause', roomId, time: remoteTime });
+      devLog('sync event received', { type: 'pause', roomId, time: remoteTime });
       runSyncedUpdate(() => {
         if (typeof remoteTime === 'number') {
           videoRef.current.currentTime = remoteTime;
@@ -404,7 +416,7 @@ const VideoPlayer = forwardRef(function VideoPlayer(
 
     const handleRemoteSeek = ({ currentTime: remoteTime }) => {
       if (!videoRef.current || typeof remoteTime !== 'number') return;
-      console.log('sync event received', { type: 'seek', roomId, time: remoteTime });
+      devLog('sync event received', { type: 'seek', roomId, time: remoteTime });
       runSyncedUpdate(() => {
         videoRef.current.currentTime = remoteTime;
       });
@@ -428,7 +440,7 @@ const VideoPlayer = forwardRef(function VideoPlayer(
       const el = videoRef.current;
       if (!el || isSyncingRef.current) return;
       const hostTime = el.currentTime || 0;
-      console.log('[SYNC SEND]', { roomId, currentTime: hostTime });
+      devLog('[SYNC SEND]', { roomId, currentTime: hostTime });
       socket.emit('videoHostSync', {
         roomId,
         currentTime: hostTime,
@@ -444,8 +456,8 @@ const VideoPlayer = forwardRef(function VideoPlayer(
       if (!el || typeof t !== 'number' || isSyncingRef.current) return;
       const localTime = el.currentTime || 0;
       const drift = Math.abs(localTime - t);
-      console.log('[SYNC RECEIVE]', { roomId, hostTime: t, localTime });
-      console.log('[TIME DIFF]', { roomId, diff: drift });
+      devLog('[SYNC RECEIVE]', { roomId, hostTime: t, localTime });
+      devLog('[TIME DIFF]', { roomId, diff: drift });
       if (drift <= HOST_SYNC_SEEK_TOLERANCE_SECONDS) return;
       isSyncingRef.current = true;
       el.currentTime = t;
@@ -515,33 +527,33 @@ const VideoPlayer = forwardRef(function VideoPlayer(
               playsInline
               controls={isHost}
               onLoadStart={() =>
-                console.log('[VideoPlayer] onLoadStart', { src: videoSrcRef.current })
+                devLog('[VideoPlayer] onLoadStart', { src: videoSrcRef.current })
               }
               onPlay={(e) => {
-                console.log("[VIDEO PLAY]");
+                devLog("[VIDEO PLAY]");
                 handlePlay(e);
               }}
               onPause={(e) => {
-                console.log("[VIDEO PAUSE]");
+                devLog("[VIDEO PAUSE]");
                 handlePause(e);
               }}
               onSeeked={handleSeek}
               onTimeUpdate={(e) => {
                 const time = e.target.currentTime || 0;
-                console.log("[TIME]", time);
+                devLog("[TIME]", time);
                 setCurrentTime(time);
               }}
               onLoadedMetadata={(e) => {
                 const d = e.target.duration || 0;
                 setDuration(d);
-                console.log('[VideoPlayer] onLoadedMetadata', {
+                devLog('[VideoPlayer] onLoadedMetadata', {
                   src: videoSrcRef.current,
                   duration: d,
                 });
               }}
               onLoadedData={handleVideoLoadedData}
               onCanPlay={() => {
-                console.log('[VideoPlayer] onCanPlay', { src: videoSrcRef.current });
+                devLog('[VideoPlayer] onCanPlay', { src: videoSrcRef.current });
                 setIsVideoLoading(false);
               }}
               onError={handleVideoError}

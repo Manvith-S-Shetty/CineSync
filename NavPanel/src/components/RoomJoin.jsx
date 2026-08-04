@@ -2,6 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import '../styles/RoomJoin.css';
 
+const isDev = import.meta.env.DEV;
+const devLog = (...args) => {
+    if (isDev) console.log(...args);
+};
+
 const RoomJoin = ({ onJoinRoom, onCreateRoom }) => {
     const { profile } = useAuth();
     const [roomId, setRoomId] = useState('');
@@ -31,13 +36,13 @@ const RoomJoin = ({ onJoinRoom, onCreateRoom }) => {
             alert('Please enter a Room ID to join');
             return;
         }
-        console.log('Joining room:', { roomId: finalRoomId });
+        devLog('Joining room:', { roomId: finalRoomId });
         onJoinRoom(finalRoomId);
     };
 
     const handleCreateClick = (e) => {
         e.preventDefault();
-        console.log('Creating new room...');
+        devLog('Creating new room...');
         onCreateRoom();
     };
 

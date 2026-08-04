@@ -1,0 +1,16 @@
+---
+alwaysApply: true
+---
+
+For every task:
+
+1. Analyze the project.
+2. Explain the implementation plan.
+3. List affected files.
+4. Implement incrementally.
+5. Verify the code compiles.
+6. Check for lint errors.
+7. Suggest improvements.
+8. Summarize what changed.
+
+Never modify unrelated files.

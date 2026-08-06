@@ -30,16 +30,7 @@ function parseServiceAccountFromEnv() {
     const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
     let privateKey = process.env.FIREBASE_PRIVATE_KEY;
 
-    // --- TEMP DEBUG: raw console, bypasses the log/warn/error wrappers ---
-    console.log("KEY DEBUG >> FIREBASE_SERVICE_ACCOUNT_JSON present:", !!json);
-    console.log("KEY DEBUG >> projectId present:", !!projectId);
-    console.log("KEY DEBUG >> clientEmail present:", !!clientEmail);
-    console.log("KEY DEBUG >> privateKey length:", privateKey?.length);
-    console.log("KEY DEBUG >> privateKey starts with:", privateKey?.slice(0, 25));
-    console.log("KEY DEBUG >> has real newlines:", privateKey?.includes("\n"));
-    console.log("KEY DEBUG >> has literal backslash-n:", privateKey?.includes("\\n"));
-    // --- END TEMP DEBUG ---
-
+    
     if (projectId && clientEmail && privateKey) {
         privateKey = String(privateKey).replace(/\\n/g, '\n');
         return {
@@ -92,8 +83,8 @@ function initFirebaseAdmin() {
         return ready;
     } catch (err) {
         //error('[auth] Firebase Admin init failed:', err?.message || err);
-        console.error('[auth] Firebase Admin init failed:', err?.message || err); // was: error(...)
-        
+        console.error('[auth] Firebase Admin init failed. Full error:', err);
+   
         ready = false;
         return ready;
     }

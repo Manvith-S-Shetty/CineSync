@@ -39,7 +39,15 @@ function parseServiceAccountFromEnv() {
     console.log("KEY DEBUG >> has real newlines:", privateKey?.includes("\n"));
     console.log("KEY DEBUG >> has literal backslash-n:", privateKey?.includes("\\n"));
     // --- END TEMP DEBUG ---
+    // another debug
+    console.log("KEY DEBUG >> privateKey ends with:", JSON.stringify(privateKey?.slice(-30)));
+    console.log("KEY DEBUG >> occurrences of BEGIN:", (privateKey?.match(/BEGIN PRIVATE KEY/g) || []).length);
+    console.log("KEY DEBUG >> occurrences of END:", (privateKey?.match(/END PRIVATE KEY/g) || []).length);
 
+    const afterReplace = String(privateKey).replace(/\\n/g, '\n');
+    console.log("KEY DEBUG >> AFTER replace, ends with:", JSON.stringify(afterReplace.slice(-40)));
+    console.log("KEY DEBUG >> AFTER replace, still has backslash-n:", afterReplace.includes("\\n"));
+    // added thing in debug
     if (projectId && clientEmail && privateKey) {
         privateKey = String(privateKey).replace(/\\n/g, '\n');
         return {
@@ -92,8 +100,8 @@ function initFirebaseAdmin() {
         return ready;
     } catch (err) {
         //error('[auth] Firebase Admin init failed:', err?.message || err);
-        console.error('[auth] Firebase Admin init failed:', err?.message || err); // was: error(...)
-        
+        console.error('[auth] Firebase Admin init failed. Full error:', err);
+   
         ready = false;
         return ready;
     }

@@ -31,8 +31,8 @@ A real-time watch party web application that allows users to watch videos togeth
 ### 1️⃣ Clone the repository
 
 ```bash
-git clone https://github.com/your-username/cinesync-watch-party.git
-cd cinesync-watch-party
+git clone https://github.com/Manvith-S-Shetty/CineSync.git
+cd CineSync
 ```
 
 ---

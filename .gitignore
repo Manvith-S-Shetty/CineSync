@@ -9,4 +9,36 @@ build/
 .vscode/
 .DS_Store
 npm-debug.log*
+# TypeScript build artifacts
+*.tsbuildinfo
+NavPanel/vite.config.d.ts
+
+# Local environment overrides (keep example/template env files trackable)
+.env.local
+.env.*.local
+NavPanel/.env.*
+!NavPanel/.env.example
+!NavPanel/.env.*.example
+!NavPanel/.env.sample
+!NavPanel/.env.*.sample
+!NavPanel/.env.template
+!NavPanel/.env.*.template
+VisionBridge/.env.*
+!VisionBridge/.env.example
+!VisionBridge/.env.*.example
+!VisionBridge/.env.sample
+!VisionBridge/.env.*.sample
+!VisionBridge/.env.template
+!VisionBridge/.env.*.template
+
+# Certificates and private keys
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.cer
+
+# Firebase Admin credential files
+*firebase-adminsdk*.json
 .cursor

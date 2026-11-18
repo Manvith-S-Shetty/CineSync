@@ -1,11 +1,10 @@
-# Optional Render Blueprint: New → Blueprint → paste this file or connect the repo.
 services:
   - type: web
     name: video-chat-signaling
     runtime: node
     plan: free
     rootDir: VisionBridge
-    buildCommand: npm install
+    buildCommand: npm install && npm run build
     startCommand: npm start
     envVars:
       - key: NODE_VERSION
@@ -14,4 +13,13 @@ services:
         sync: false
       - key: FIREBASE_SERVICE_ACCOUNT_JSON
         sync: false
+      - key: DATABASE_URL
+        sync: false
+      # Optional overrides (set in Render dashboard if needed):
+      # - key: DATABASE_SSL
+      #   value: "true"
+      # - key: DATABASE_SSL_REJECT_UNAUTHORIZED
+      #   value: "false"
+      # - key: DATABASE_POOL_MAX
+      #   value: "10"
     healthCheckPath: /health

@@ -41,3 +41,4 @@ VisionBridge/.env.*
 
 # Firebase Admin credential files
 *firebase-adminsdk*.json
+.cursor

@@ -3,15 +3,22 @@
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react';
 import {
+  getRedirectResult,
   onAuthStateChanged,
   signInWithPopup,
+  signInWithRedirect,
   signOut,
   type User,
 } from 'firebase/auth';
 import { auth, firebaseReady, googleProvider } from '../firebase';
+import {
+  getAuthErrorMessage,
+  shouldFallbackToRedirect,
+} from '../utils/authErrors';
 import type { AuthContextValue, AuthProviderProps } from '../types/auth';
 import type { UserProfile } from '../types/models';
 
@@ -20,23 +27,80 @@ export const AuthContext = createContext<AuthContextValue | null>(null);
 export function AuthProvider({ children }: AuthProviderProps) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
+  const [authError, setAuthError] = useState<string | null>(null);
+  const redirectCheckedRef = useRef(false);
+  const signInPromiseRef = useRef<Promise<void> | null>(null);
 
   useEffect(() => {
     if (!firebaseReady || !auth) {
       setLoading(false);
       return;
     }
-    return onAuthStateChanged(auth, (u) => {
+
+    let authStateSettled = false;
+    let redirectSettled = false;
+
+    const settleLoading = () => {
+      if (authStateSettled && redirectSettled) setLoading(false);
+    };
+
+    const unsubscribe = onAuthStateChanged(auth, (u) => {
       setUser(u);
-      setLoading(false);
+      authStateSettled = true;
+      settleLoading();
     });
+
+    // Process a pending redirect result exactly once per app initialization.
+    if (redirectCheckedRef.current) {
+      redirectSettled = true;
+      settleLoading();
+    } else {
+      redirectCheckedRef.current = true;
+      getRedirectResult(auth)
+        .catch((error: unknown) => {
+          setAuthError(getAuthErrorMessage(error));
+        })
+        .finally(() => {
+          redirectSettled = true;
+          settleLoading();
+        });
+    }
+
+    return unsubscribe;
   }, []);
 
-  const signInWithGoogle = useCallback(async (): Promise<void> => {
-    if (!auth || !googleProvider) {
-      throw new Error('Firebase is not configured. Set VITE_FIREBASE_* in .env');
-    }
-    await signInWithPopup(auth, googleProvider);
+  const signInWithGoogle = useCallback((): Promise<void> => {
+    if (signInPromiseRef.current) return signInPromiseRef.current;
+
+    const run = async (): Promise<void> => {
+      if (!auth || !googleProvider) {
+        throw new Error('Firebase is not configured. Set VITE_FIREBASE_* in .env');
+      }
+
+      setAuthError(null);
+
+      try {
+        await signInWithPopup(auth, googleProvider);
+      } catch (error: unknown) {
+        // Fall back to a full-page redirect only when the browser/environment
+        // refuses to open the popup. Never fall back for unrelated errors.
+        if (shouldFallbackToRedirect(error)) {
+          await signInWithRedirect(auth, googleProvider);
+          return;
+        }
+        throw error;
+      }
+    };
+
+    const promise = run().finally(() => {
+      signInPromiseRef.current = null;
+    });
+    signInPromiseRef.current = promise;
+    return promise;
+  }, []);
+
+  const clearAuthError = useCallback(() => {
+    setAuthError(null);
   }, []);
 
   const logout = useCallback(async (): Promise<void> => {
@@ -74,8 +138,19 @@ export function AuthProvider({ children }: AuthProviderProps) {
       signInWithGoogle,
       logout,
       getIdToken,
+      authError,
+      clearAuthError,
     }),
-    [user, profile, loading, signInWithGoogle, logout, getIdToken]
+    [
+      user,
+      profile,
+      loading,
+      signInWithGoogle,
+      logout,
+      getIdToken,
+      authError,
+      clearAuthError,
+    ]
   );
 
   return (

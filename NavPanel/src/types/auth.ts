@@ -10,6 +10,8 @@ export interface AuthContextValue {
   signInWithGoogle: () => Promise<void>;
   logout: () => Promise<void>;
   getIdToken: (forceRefresh?: boolean) => Promise<string>;
+  authError: string | null;
+  clearAuthError: () => void;
 }
 
 export interface AuthProviderProps {

@@ -1,14 +1,10 @@
 ﻿import { useState, useEffect, type FormEvent, type MouseEvent } from 'react';
 import { useAuth } from '../contexts/useAuth';
+import { getAuthErrorCode, getAuthErrorMessage } from '../utils/authErrors';
 import './LoginScreen.css';
 
-interface FirebaseErrorLike {
-  code?: string;
-  message?: string;
-}
-
 export default function LoginScreen() {
-  const { signInWithGoogle, firebaseReady } = useAuth();
+  const { signInWithGoogle, firebaseReady, authError, clearAuthError } = useAuth();
   const [isSignUp, setIsSignUp] = useState(false);
   const [err, setErr] = useState('');
   const [loading, setLoading] = useState(false);
@@ -40,16 +36,17 @@ export default function LoginScreen() {
   const onGoogle = async (e: MouseEvent<HTMLButtonElement>) => {
     e.preventDefault();
     e.stopPropagation();
+    if (loading) return;
     setErr('');
+    clearAuthError();
     setLoading(true);
     try {
       await signInWithGoogle();
-    } catch (e: unknown) {
-      const fe = e as FirebaseErrorLike;
-      console.error('GOOGLE LOGIN ERROR:', e);
-      console.error('CODE:', fe?.code);
-      console.error('MESSAGE:', fe?.message);
-      setErr(`${fe?.code ?? 'auth/error'} : ${fe?.message ?? 'Sign-in failed'}`);
+    } catch (error: unknown) {
+      if (import.meta.env.DEV) {
+        console.error('GOOGLE LOGIN ERROR CODE:', getAuthErrorCode(error));
+      }
+      setErr(getAuthErrorMessage(error));
     } finally {
       setLoading(false);
     }
@@ -63,6 +60,8 @@ export default function LoginScreen() {
   const bgImage = isSignUp
     ? "url('https://lh3.googleusercontent.com/aida-public/AB6AXuDtzKTBrpJP58irWVMQWLRCZu8jsK4q3vWi3k20_3FI-bQYqfNzTUDKAH72htH-_gztwajGTCFZA_PDtYxVjrgplaV0UPObZw4_jcuPiY0Pej6RdtHYzuhmT587_ISONuDYUzZz6r0ZukcRSiLgLejtMFdokex8aHudZiGeg_xM6KepCoOSlEuPhboKY-jJu_jaZuDQL5lCyai2rqKrW5E769fZileKsyUTMQc21fsq7TQZJRaYZjbtUp3y-DzsRrT7hGLkBVO7i_k')"
     : "url('https://lh3.googleusercontent.com/aida-public/AB6AXuBwQo-XiWAdeqsN9kRcR6VR221-36imYH9FbLCOKBZiN86gMUjp9qr-if9ABQoGef2wWrERRePdtQP_ZR_1JAjgWnqyAG_WF_-Ucvbhx1dCRwHVKvFjrNLZKPG_tNmM3T74zaddzBDuVkWR4ATOpWqbuvbs_jVq64A51W2KSgTkM87qp9bNVboaCI5YWG0i2_KchaaN7nkMwNXufkz4A5SsqfpcFCV-F1oi4Ue06JZXqw8I8a2F1j708wHZI-3MHknUwJQne-rBV7k')";
+
+  const displayError = err || authError;
 
   return (
     <div className="login-screen-root bg-background text-on-surface min-h-screen flex flex-col relative overflow-hidden font-body-md">
@@ -114,8 +113,8 @@ export default function LoginScreen() {
                   {!firebaseReady && (
                     <div className="mb-4 p-3 bg-error-container/30 border border-error-container text-error rounded-lg text-sm">Firebase is not configured. Google Sign-In is disabled.</div>
                   )}
-                  {err && (
-                    <div className="mb-4 p-3 bg-error-container/30 border border-error-container text-error rounded-lg text-sm">{err}</div>
+                  {displayError && (
+                    <div className="mb-4 p-3 bg-error-container/30 border border-error-container text-error rounded-lg text-sm">{displayError}</div>
                   )}
                   <form className="space-y-6" onSubmit={handleFormSubmit}>
                     <div className="space-y-4">
@@ -172,7 +171,7 @@ export default function LoginScreen() {
                     <p className="font-body-md text-body-md text-on-surface-variant">Join the premiere social viewing experience.</p>
                   </div>
                   {!firebaseReady && (<div className="mb-4 p-3 bg-error-container/30 border border-error-container text-error rounded-lg text-sm">Firebase is not configured. Google Sign-In is disabled.</div>)}
-                  {err && (<div className="mb-4 p-3 bg-error-container/30 border border-error-container text-error rounded-lg text-sm">{err}</div>)}
+                  {displayError && (<div className="mb-4 p-3 bg-error-container/30 border border-error-container text-error rounded-lg text-sm">{displayError}</div>)}
                   <div className="space-y-4 mb-8">
                     <button onClick={onGoogle} disabled={!firebaseReady || loading} className="w-full flex items-center justify-center gap-3 py-3 px-4 bg-surface-container-high/60 backdrop-blur-md hover:bg-surface-container-highest/80 border border-outline-variant/50 rounded-lg transition-colors duration-300 font-label-md text-label-md text-white disabled:opacity-50 disabled:cursor-not-allowed">
                       Continue with Google

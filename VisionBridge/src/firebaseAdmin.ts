@@ -107,7 +107,16 @@ function isFirebaseAdminReady(): boolean {
     return ready;
 }
 
-async function verifyIdToken(idToken: unknown): Promise<VerifiedIdentity> {
+/**
+ * Verify a Firebase ID token and return only server-trusted identity.
+ * Set `checkRevoked` for privileged/admin authorization paths.
+ *
+ * Future custom-claim support: the decoded token returned by
+ * `getAuth().verifyIdToken` already contains custom claims (for example
+ * `decoded.admin === true`). They can be checked here later without changing
+ * the Socket.IO identity contract.
+ */
+async function verifyIdToken(idToken: unknown, checkRevoked = false): Promise<VerifiedIdentity> {
     if (!isFirebaseAdminReady()) {
         const err: AuthError = new Error('AUTH_UNAVAILABLE');
         err.code = 'AUTH_UNAVAILABLE';
@@ -119,7 +128,7 @@ async function verifyIdToken(idToken: unknown): Promise<VerifiedIdentity> {
         throw err;
     }
 
-    const decoded = await getAuth().verifyIdToken(idToken.trim());
+    const decoded = await getAuth().verifyIdToken(idToken.trim(), checkRevoked);
     const email = typeof decoded.email === 'string' ? decoded.email : '';
     const displayName =
         (typeof decoded.name === 'string' && decoded.name.trim()) ||

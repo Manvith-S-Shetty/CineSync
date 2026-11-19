@@ -7,6 +7,9 @@ import { Server, Socket } from 'socket.io';
 import cors = require('cors');
 import firebaseAdmin = require('./firebaseAdmin');
 import { checkDatabaseHealth, getPool, isDatabaseConfigured } from './db/pool';
+import adminRouter = require('./routes/admin');
+import adminAnalyticsRouter = require('./routes/adminAnalytics');
+import { adminRateLimit } from './middleware/adminRateLimit';
 import {
     createRoomWithHost,
     endRoomPersistence,
@@ -22,6 +25,7 @@ const { initFirebaseAdmin, isFirebaseAdminReady, verifyIdToken } = firebaseAdmin
 initFirebaseAdmin();
 
 const app = express();
+app.disable('x-powered-by');
 const server = http.createServer(app);
 const isProduction = process.env.NODE_ENV === 'production';
 const log = (...args: unknown[]): void => {
@@ -150,6 +154,11 @@ app.get('/', (_req: express.Request, res: express.Response) => {
         },
     });
 });
+
+// Admin HTTP routes are protected by verified Firebase identity + backend allowlist.
+app.use('/api/admin', adminRateLimit);
+app.use('/api/admin', adminRouter);
+app.use('/api/admin', adminAnalyticsRouter);
 
 const io = new Server(server, {
     cors: {

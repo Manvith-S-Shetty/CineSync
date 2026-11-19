@@ -8,6 +8,12 @@ import { AuthProvider } from './contexts/AuthContext';
 import { useAuth } from './contexts/useAuth';
 import LoginScreen from './components/LoginScreen';
 import AppHeader from './components/AppHeader';
+import AdminRoute from './admin/AdminRoute';
+import AdminLayout from './admin/AdminLayout';
+import AdminOverview from './pages/admin/AdminOverview';
+import AdminUsers from './pages/admin/AdminUsers';
+import AdminAnalytics from './pages/admin/AdminAnalytics';
+import AdminActivity from './pages/admin/AdminActivity';
 
 function AuthLoading() {
   return (
@@ -65,6 +71,14 @@ function AppRoutes() {
       <Route path="/login" element={<LoginRoute />} />
       <Route element={<ProtectedLayout />}>
         <Route path="/" element={<VideoChat />} />
+      </Route>
+      <Route path="/admin" element={<AdminRoute />}>
+        <Route element={<AdminLayout />}>
+          <Route index element={<AdminOverview />} />
+          <Route path="users" element={<AdminUsers />} />
+          <Route path="analytics" element={<AdminAnalytics />} />
+          <Route path="activity" element={<AdminActivity />} />
+        </Route>
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
